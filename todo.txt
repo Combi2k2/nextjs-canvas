@@ -1,0 +1,7 @@
+- partial eraser
+- resizing selected object
+- editting selected object:
+    - ellipse
+    - polygon
+    - polyline
+    - rectangle
