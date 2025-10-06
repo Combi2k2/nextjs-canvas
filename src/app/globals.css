@@ -525,6 +525,24 @@ body {
   z-index: 1;
 }
 
+/* Eraser cursor - blank circle */
+.konva-stage.eraser-cursor {
+  cursor: none;
+}
+
+.eraser-cursor::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #333;
+  border-radius: 50%;
+  background: transparent;
+  pointer-events: none;
+  z-index: 1000;
+  transform: translate(-50%, -50%);
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .toolbar-pill {

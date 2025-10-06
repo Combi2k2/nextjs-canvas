@@ -29,6 +29,8 @@ interface ToolbarProps {
     onColorChange: (color: string) => void;
     strokeWidth: number;
     onStrokeWidthChange: (width: number) => void;
+    eraserSize: number;
+    onEraserSizeChange: (size: number) => void;
     onUndo: () => void;
     onRedo: () => void;
     onDelete: () => void;
@@ -54,6 +56,8 @@ export default function Toolbar({
     onColorChange,
     strokeWidth,
     onStrokeWidthChange,
+    eraserSize,
+    onEraserSizeChange,
     onUndo,
     onRedo,
     onDelete,
@@ -199,7 +203,6 @@ export default function Toolbar({
 
                 {/* Color Menu Section */}
                 <div className="toolbar-section">
-                    <span className="section-label">Color Menu</span>
                     <div className="color-controls">
                         <div 
                             className="main-color-swatch"
@@ -221,19 +224,34 @@ export default function Toolbar({
                     </div>
                 </div>
 
-                {/* Stroke Set Section */}
+                {/* Size Controls Section */}
                 <div className="toolbar-section">
-                    <span className="section-label">Stroke Set</span>
                     <div className="stroke-controls">
-                        <span className="stroke-label">{strokeWidth}px</span>
-                        <input
-                            type="range"
-                            min="1"
-                            max="50"
-                            value={strokeWidth}
-                            onChange={(e) => onStrokeWidthChange(Number(e.target.value))}
-                            className="stroke-slider"
-                        />
+                        {tool === 'eraser' ? (
+                            <>
+                                <span className="stroke-label">{eraserSize}px</span>
+                                <input
+                                    type="range"
+                                    min="20"
+                                    max="100"
+                                    value={eraserSize}
+                                    onChange={(e) => onEraserSizeChange(Number(e.target.value))}
+                                    className="stroke-slider"
+                                />
+                            </>
+                        ) : (
+                            <>
+                                <span className="stroke-label">{strokeWidth}px</span>
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="50"
+                                    value={strokeWidth}
+                                    onChange={(e) => onStrokeWidthChange(Number(e.target.value))}
+                                    className="stroke-slider"
+                                />
+                            </>
+                        )}
                     </div>
                 </div>
 

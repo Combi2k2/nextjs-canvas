@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect } from 'react';
-import { isPointInAnnotation, isAnnotationInRect } from '@/utils/geometry';
+import { isPointInAnnotation, isAnnotationInRect, isAnnotationInEraserCircle } from '@/utils/geometry';
 import { useDrawingState } from '@/hooks/useDrawingState';
 import { Point, ShapeAnnotation, StrokeAnnotation, TextAnnotation, ImageAnnotation } from '@/types/annotations';
 import Canvas from './Canvas';
@@ -15,6 +15,7 @@ export default function DrawingApp() {
         historyStep,
         color,
         strokeWidth,
+        eraserSize,
         isDrawing,
         currentPoints,
         selectedIds,
@@ -29,6 +30,7 @@ export default function DrawingApp() {
         setTool,
         setAnnotations,
         setStrokeWidth,
+        setEraserSize,
         setIsDrawing,
         setCurrentPoints,
         setSelectedIds,
@@ -473,14 +475,15 @@ export default function DrawingApp() {
 
     const handleErase = useCallback((e: { point: Point }) => {
         const point = e.point;
-        const toRemove = annotations.find(ann => isPointInAnnotation(point.x, point.y, ann));
+        const eraserRadius = eraserSize / 2;
+        const toRemove = annotations.find(ann => isAnnotationInEraserCircle(point.x, point.y, eraserRadius, ann));
         
         if (toRemove) {
             const newAnnotations = annotations.filter(ann => ann.id !== toRemove.id);
             setAnnotations(newAnnotations);
             saveToHistory(newAnnotations);
         }
-    }, [annotations, saveToHistory, setAnnotations]);
+    }, [annotations, saveToHistory, setAnnotations, eraserSize]);
 
 
     const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -526,6 +529,8 @@ export default function DrawingApp() {
                     onColorChange={handleColorChange}
                     strokeWidth={strokeWidth}
                     onStrokeWidthChange={setStrokeWidth}
+                    eraserSize={eraserSize}
+                    onEraserSizeChange={setEraserSize}
                     onUndo={handleUndo}
                     onRedo={handleRedo}
                     onDelete={handleDelete}
@@ -607,6 +612,7 @@ export default function DrawingApp() {
                         tool={tool}
                         color={color}
                         strokeWidth={strokeWidth}
+                        eraserSize={eraserSize}
                         currentPoints={currentPoints}
                         selectionRect={selectionRect}
                         selectedShapeType={selectedShapeType}

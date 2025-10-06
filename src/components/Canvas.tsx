@@ -11,6 +11,7 @@ interface CanvasProps {
     tool: string;
     color: string;
     strokeWidth: number;
+    eraserSize: number;
     currentPoints: number[];
     selectionRect: { x: number; y: number; width: number; height: number } | null;
     selectedShapeType: ShapeType;
@@ -35,6 +36,7 @@ export default function Canvas({
     tool,
     color,
     strokeWidth,
+    eraserSize,
     currentPoints,
     selectionRect,
     selectedShapeType,
@@ -403,8 +405,8 @@ export default function Canvas({
                     const point = getCanvasPoint(e.evt);
                     onDoubleClick({ point });
                 }}
-                className="konva-stage"
-                style={{ cursor: tool === 'select' && selectedIds.length > 0 ? 'move' : 'crosshair' }}
+                className={`konva-stage ${tool === 'eraser' ? 'eraser-cursor' : ''}`}
+                style={{ cursor: tool === 'select' && selectedIds.length > 0 ? 'move' : tool === 'eraser' ? 'none' : 'crosshair' }}
             >
                 <Layer>
                     {/* Render all annotations */}
@@ -527,6 +529,19 @@ export default function Canvas({
                             stroke="#3b82f6"
                             strokeWidth={2}
                             dash={[10, 5]}
+                        />
+                    )}
+                    
+                    {/* Render eraser circle */}
+                    {tool === 'eraser' && (
+                        <Circle
+                            x={mousePosition.x}
+                            y={mousePosition.y}
+                            radius={eraserSize / 2}
+                            stroke="#333"
+                            strokeWidth={2}
+                            fill="transparent"
+                            opacity={0.7}
                         />
                     )}
                     

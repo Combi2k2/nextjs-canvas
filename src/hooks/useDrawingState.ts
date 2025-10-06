@@ -8,6 +8,7 @@ export const useDrawingState = () => {
     const [historyStep, setHistoryStep] = useState(0);
     const [color, setColor] = useState('#000000');
     const [strokeWidth, setStrokeWidth] = useState(3);
+    const [eraserSize, setEraserSize] = useState(40);
     const [isDrawing, setIsDrawing] = useState(false);
     const [currentPoints, setCurrentPoints] = useState<number[]>([]);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -104,6 +105,7 @@ export const useDrawingState = () => {
         historyStep,
         color,
         strokeWidth,
+        eraserSize,
         isDrawing,
         currentPoints,
         selectedIds,
@@ -123,6 +125,7 @@ export const useDrawingState = () => {
         setAnnotations,
         setColor,
         setStrokeWidth,
+        setEraserSize,
         setIsDrawing,
         setCurrentPoints,
         setSelectedIds,
