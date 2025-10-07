@@ -3,11 +3,20 @@ export interface Point {
     y: number;
 }
 
+export interface Bounds {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
 export interface BaseAnnotation {
     id: string;
     type: 'stroke' | 'text' | 'image' | 'shape';
     color: string;
     strokeWidth: number;
+    isEditing: boolean;
+    isSelected: boolean;
 }
 
 export interface StrokeAnnotation extends BaseAnnotation {
@@ -80,6 +89,14 @@ export interface DragState {
     offset: Point;
 }
 
+export interface ResizeState {
+    isResizing: boolean;
+    startPoint: Point | null;
+    currentPoint: Point | null;
+    anchorIndex: number | null;
+    originalAnnotation: Annotation | null;
+}
+
 export type Tool = 'select' | 'brush' | 'shape' | 'text' | 'image' | 'eraser';
 export type ShapeType = 'rectangle' | 'ellipse' | 'polygon' | 'polyline' | 'line' | 'bezier';
 
@@ -92,11 +109,11 @@ export interface DrawingState {
     strokeWidth: number;
     isDrawing: boolean;
     currentPoints: number[];
-    selectedIds: string[];
     selectionRect: SelectionRect | null;
     textInput: TextInput;
     showColorPicker: boolean;
     dragState: DragState;
+    resizeState: ResizeState;
     hoveredId: string | null;
     selectedShapeType: ShapeType;
     isDrawingPolygon: boolean;

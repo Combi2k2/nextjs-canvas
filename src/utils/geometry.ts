@@ -20,10 +20,32 @@ export const isPointInAnnotation = (x: number, y: number, annotation: Annotation
             );
             return Math.abs(dist - radius) < 10;
         } else if (annotation.shapeType === 'rectangle') {
-            return x >= annotation.x && 
-                x <= annotation.x + annotation.width &&
-                y >= annotation.y && 
-                y <= annotation.y + annotation.height;
+            // Check if point is near the rectangle's edges (not inside)
+            const threshold = 10;
+            const rectX = annotation.x;
+            const rectY = annotation.y;
+            const rectWidth = annotation.width;
+            const rectHeight = annotation.height;
+            
+            // Check if point is near any of the four edges
+            // Top edge
+            if (Math.abs(y - rectY) <= threshold && x >= rectX && x <= rectX + rectWidth) {
+                return true;
+            }
+            // Bottom edge
+            if (Math.abs(y - (rectY + rectHeight)) <= threshold && x >= rectX && x <= rectX + rectWidth) {
+                return true;
+            }
+            // Left edge
+            if (Math.abs(x - rectX) <= threshold && y >= rectY && y <= rectY + rectHeight) {
+                return true;
+            }
+            // Right edge
+            if (Math.abs(x - (rectX + rectWidth)) <= threshold && y >= rectY && y <= rectY + rectHeight) {
+                return true;
+            }
+            
+            return false;
         } else if (annotation.shapeType === 'line') {
             const points = annotation.points || [];
             if (points.length >= 4) {

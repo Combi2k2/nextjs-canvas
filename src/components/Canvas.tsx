@@ -1,9 +1,11 @@
 'use client';
 
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React from 'react';
 import { Stage, Layer, Line, Circle, Rect, Text, Image as KonvaImage, Ellipse, Group, Path } from 'react-konva';
 import Konva from 'konva';
-import { Annotation, Point, ShapeType } from '@/types/annotations';
+import { Annotation, Point, ShapeType, Bounds } from '@/types/annotations';
+import { calculateBounds } from '@/hooks/useDrawingState';
 
 // Helper function to create SVG path for 3-point bezier curve
 const createBezierPath = (points: Point[]): string => {
@@ -19,8 +21,10 @@ const createBezierPath = (points: Point[]): string => {
 
 interface CanvasProps {
     annotations: Annotation[];
-    selectedIds: string[];
+    getSelectedIds: () => string[];
     hoveredId: string | null;
+    hoveredAnchorIndex: number | null;
+    getCursorForAnchorIndex: (anchorIndex: number) => string;
     tool: string;
     color: string;
     strokeWidth: number;
@@ -28,13 +32,15 @@ interface CanvasProps {
     currentPoints: number[];
     selectionRect: { x: number; y: number; width: number; height: number } | null;
     selectedShapeType: ShapeType;
+    editingAnnotationId: string | null;
+    editingControlPointIndex: number | null;
     isDrawingPolygon: boolean;
     polygonPoints: Point[];
     isDrawingLine: boolean;
     linePoints: Point[];
     isDrawingBezier: boolean;
     bezierPoints: Point[];
-    onMouseDown: (e: { point: Point }) => void;
+    onMouseDown: (e: { point: Point; ctrlKey?: boolean; metaKey?: boolean }) => void;
     onMouseMove: (e: { point: Point; shiftKey?: boolean }) => void;
     onMouseUp: () => void;
     onDoubleClick: (e: { point: Point }) => void;
@@ -45,8 +51,10 @@ interface CanvasProps {
 
 export default function Canvas({
     annotations,
-    selectedIds,
+    getSelectedIds,
     hoveredId,
+    hoveredAnchorIndex,
+    getCursorForAnchorIndex,
     tool,
     color,
     strokeWidth,
@@ -54,6 +62,8 @@ export default function Canvas({
     currentPoints,
     selectionRect,
     selectedShapeType,
+    editingAnnotationId,
+    editingControlPointIndex,
     isDrawingPolygon,
     polygonPoints,
     isDrawingLine,
@@ -78,6 +88,7 @@ export default function Canvas({
     const [editingText, setEditingText] = useState<string>('');
     const [lastAnnotationsLength, setLastAnnotationsLength] = useState(0);
     const [editingTextPosition, setEditingTextPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const doubleClickPendingRef = useRef<boolean>(false);
 
     // Handle client-side mounting
     useEffect(() => {
@@ -144,7 +155,40 @@ export default function Canvas({
     const handleMouseDown = (e: { evt: MouseEvent }) => {
         const point = getCanvasPoint(e.evt);
         
-        if (tool === 'shape' && isDrawingPolygon && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') && polygonPoints.length > 0 && onVertexClick) {
+        // For polyline, check if we should skip this mouse down (might be part of double-click)
+        if (tool === 'shape' && selectedShapeType === 'polyline' && isDrawingPolygon) {
+            // Only handle vertex clicks for existing points
+            if (polygonPoints.length > 0 && onVertexClick) {
+                const threshold = 15;
+                for (let i = 0; i < polygonPoints.length; i++) {
+                    const vertex = polygonPoints[i];
+                    const distance = Math.sqrt(
+                        Math.pow(point.x - vertex.x, 2) + Math.pow(point.y - vertex.y, 2)
+                    );
+                    if (distance <= threshold) {
+                        onVertexClick(i);
+                        return;
+                    }
+                }
+            }
+            // For polyline, don't immediately add points - wait to see if it's a double-click
+            doubleClickPendingRef.current = true;
+            // Set a timeout to handle single clicks (not double-clicks)
+            setTimeout(() => {
+                if (doubleClickPendingRef.current) {
+                    // This was a single click, not a double-click, so add the point
+                    onMouseDown({ 
+                        point, 
+                        ctrlKey: e.evt.ctrlKey, 
+                        metaKey: e.evt.metaKey 
+                    });
+                    doubleClickPendingRef.current = false;
+                }
+            }, 250); // 250ms delay to allow double-click to be processed
+            return;
+        }
+        
+        if (tool === 'shape' && isDrawingPolygon && selectedShapeType === 'polygon' && polygonPoints.length > 0 && onVertexClick) {
             const threshold = 15; // Increased threshold for easier clicking
             for (let i = 0; i < polygonPoints.length; i++) {
                 const vertex = polygonPoints[i];
@@ -152,14 +196,17 @@ export default function Canvas({
                     Math.pow(point.x - vertex.x, 2) + Math.pow(point.y - vertex.y, 2)
                 );
                 if (distance <= threshold) {
-                    console.log(`Clicked on vertex ${i}, distance: ${distance}`);
                     onVertexClick(i);
                     return;
                 }
             }
         }
         
-        onMouseDown({ point });
+        onMouseDown({ 
+            point, 
+            ctrlKey: e.evt.ctrlKey, 
+            metaKey: e.evt.metaKey 
+        });
     };
 
     const handleMouseMove = (e: { evt: MouseEvent }) => {
@@ -239,7 +286,7 @@ export default function Canvas({
 
     const renderAnnotation = useMemo(() => {
         return (annotation: Annotation) => {
-            const isSelected = selectedIds.includes(annotation.id);
+            const isSelected = tool === 'select' && annotation.isSelected;
             const isHovered = hoveredId === annotation.id;
             const highlightColor = '#3b82f6';
 
@@ -405,7 +452,118 @@ export default function Canvas({
             }
             return null;
         };
-    }, [selectedIds, hoveredId, editingTextId, editingText, annotations, onTextEdit]);
+    }, [tool, hoveredId, editingTextId, editingText, annotations, onTextEdit]);
+
+    const renderControlPoints = useCallback((annotation: Annotation) => {
+        // Only show control points when selection tool is active, editing (single selection) and for specific shape types
+        if (tool !== 'select' || !annotation.isSelected || !annotation.isEditing) return null;
+        
+        const controlPoints = [];
+        
+        if (annotation.type === 'shape') {
+            // Only show control points for line-based shapes when editing
+            if (annotation.shapeType === 'line' || annotation.shapeType === 'polygon' || annotation.shapeType === 'polyline' || annotation.shapeType === 'bezier') {
+                const points = annotation.points || [];
+                for (let i = 0; i < points.length; i += 2) {
+                    const pointIndex = i / 2;
+                    const isEditing = editingAnnotationId === annotation.id && editingControlPointIndex === pointIndex;
+                    
+                    controlPoints.push(
+                        <Circle
+                            key={`control-${annotation.id}-${pointIndex}`}
+                            x={points[i]}
+                            y={points[i + 1]}
+                            radius={isEditing ? 8 : 6}
+                            fill={isEditing ? "#ff6b6b" : "#3b82f6"}
+                            stroke="white"
+                            strokeWidth={2}
+                            shadowColor={isEditing ? "#ff6b6b" : "#3b82f6"}
+                            shadowBlur={8}
+                        />
+                    );
+                }
+            }
+        }
+        // Temporarily disable control point rendering for stroke annotations
+        // else if (annotation.type === 'stroke') {
+        //     for (let i = 0; i < annotation.points.length; i += 2) {
+        //         const pointIndex = i / 2;
+        //         const isEditing = editingAnnotationId === annotation.id && editingControlPointIndex === pointIndex;
+        //         
+        //         controlPoints.push(
+        //             <Circle
+        //                 key={`control-${annotation.id}-${pointIndex}`}
+        //                 x={annotation.points[i]}
+        //                 y={annotation.points[i + 1]}
+        //                 radius={isEditing ? 8 : 6}
+        //                 fill={isEditing ? "#ff6b6b" : "#3b82f6"}
+        //                 stroke="white"
+        //                 strokeWidth={2}
+        //                 shadowColor={isEditing ? "#ff6b6b" : "#3b82f6"}
+        //                 shadowBlur={8}
+        //             />
+        //         );
+        //     }
+        // }
+        
+        return controlPoints;
+    }, [tool, editingAnnotationId, editingControlPointIndex]);
+
+    const renderBoundingBox = useCallback((annotation: Annotation) => {
+        if (tool !== 'select' || !annotation.isSelected) return null;
+        
+        // Calculate bounds dynamically
+        const { x, y, width, height } = calculateBounds(annotation);
+        
+        
+        return (
+            <Rect
+                key={`bbox-${annotation.id}`}
+                x={x - 4}
+                y={y - 4}
+                width={width + 8}
+                height={height + 8}
+                stroke="#3b82f6"
+                strokeWidth={2}
+                fill="transparent"
+                dash={[5, 5]}
+                opacity={0.8}
+            />
+        );
+    }, [tool]);
+
+    const renderAnchorPoints = useCallback((annotation: Annotation) => {
+        if (tool !== 'select' || !annotation.isSelected) return null;
+        
+        const { x, y, width, height } = calculateBounds(annotation);
+        const anchorSize = 8;
+        
+        // Define anchor points: 8 points around the rectangle
+        const anchors = [
+            { x: x - anchorSize/2, y: y - anchorSize/2, cursor: 'nw-resize' }, // top-left
+            { x: x + width/2, y: y - anchorSize/2, cursor: 'n-resize' }, // top-center
+            { x: x + width - anchorSize/2, y: y - anchorSize/2, cursor: 'ne-resize' }, // top-right
+            { x: x + width - anchorSize/2, y: y + height/2, cursor: 'e-resize' }, // right-center
+            { x: x + width - anchorSize/2, y: y + height - anchorSize/2, cursor: 'se-resize' }, // bottom-right
+            { x: x + width/2, y: y + height - anchorSize/2, cursor: 's-resize' }, // bottom-center
+            { x: x - anchorSize/2, y: y + height - anchorSize/2, cursor: 'sw-resize' }, // bottom-left
+            { x: x - anchorSize/2, y: y + height/2, cursor: 'w-resize' }, // left-center
+        ];
+        
+        return anchors.map((anchor, index) => (
+            <Circle
+                key={`anchor-${annotation.id}-${index}`}
+                x={anchor.x + anchorSize/2}
+                y={anchor.y + anchorSize/2}
+                radius={anchorSize/2}
+                fill="#3b82f6"
+                stroke="white"
+                strokeWidth={2}
+                shadowColor="#3b82f6"
+                shadowBlur={4}
+            />
+        ));
+    }, [tool]);
 
     if (!isMounted) {
         return (
@@ -414,6 +572,7 @@ export default function Canvas({
             </div>
         );
     }
+
 
     return (
         <div ref={containerRef} className="canvas-container bg-white shadow-2xl">
@@ -427,14 +586,33 @@ export default function Canvas({
                 onMouseLeave={handleMouseUp}
                 onDblClick={(e) => {
                     const point = getCanvasPoint(e.evt);
+                    // Clear the double-click pending flag
+                    doubleClickPendingRef.current = false;
                     onDoubleClick({ point });
                 }}
                 className={`konva-stage ${tool === 'eraser' ? 'eraser-cursor' : ''}`}
-                style={{ cursor: tool === 'select' && selectedIds.length > 0 ? 'move' : tool === 'eraser' ? 'none' : 'crosshair' }}
+                style={{ 
+                    cursor: hoveredAnchorIndex !== null 
+                        ? getCursorForAnchorIndex(hoveredAnchorIndex)
+                        : tool === 'select' && getSelectedIds().length > 0 
+                            ? 'move' 
+                            : tool === 'eraser' 
+                                ? 'none' 
+                                : 'crosshair' 
+                }}
             >
                 <Layer>
                     {/* Render all annotations */}
                     {annotations.map((annotation) => renderAnnotation(annotation))}
+                    
+                    {/* Render bounding boxes, anchor points, and control points for selected annotations */}
+                    {tool === 'select' && annotations.map((annotation) => (
+                        <React.Fragment key={`edit-${annotation.id}`}>
+                            {renderBoundingBox(annotation)}
+                            {renderAnchorPoints(annotation)}
+                            {renderControlPoints(annotation)}
+                        </React.Fragment>
+                    ))}
                     
                     {/* Render current drawing */}
                     {tool === 'brush' && currentPoints.length > 0 && (
