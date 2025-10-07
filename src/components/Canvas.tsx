@@ -1,8 +1,21 @@
 'use client';
 
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Stage, Layer, Line, Circle, Rect, Text, Image as KonvaImage, Ellipse, Group } from 'react-konva';
+import { Stage, Layer, Line, Circle, Rect, Text, Image as KonvaImage, Ellipse, Group, Path } from 'react-konva';
+import Konva from 'konva';
 import { Annotation, Point, ShapeType } from '@/types/annotations';
+
+// Helper function to create SVG path for 3-point bezier curve
+const createBezierPath = (points: Point[]): string => {
+    if (points.length < 2) return '';
+    if (points.length === 2) {
+        return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    }
+    if (points.length === 3) {
+        return `M ${points[0].x} ${points[0].y} Q ${points[1].x} ${points[1].y} ${points[2].x} ${points[2].y}`;
+    }
+    return '';
+};
 
 interface CanvasProps {
     annotations: Annotation[];
@@ -19,11 +32,12 @@ interface CanvasProps {
     polygonPoints: Point[];
     isDrawingLine: boolean;
     linePoints: Point[];
+    isDrawingBezier: boolean;
+    bezierPoints: Point[];
     onMouseDown: (e: { point: Point }) => void;
     onMouseMove: (e: { point: Point; shiftKey?: boolean }) => void;
     onMouseUp: () => void;
     onDoubleClick: (e: { point: Point }) => void;
-    onErase: (e: { point: Point }) => void;
     onVertexClick?: (vertexIndex: number) => void;
     onTextEdit?: (annotationId: string, newText: string) => void;
     onTextEditCancel?: () => void;
@@ -44,16 +58,17 @@ export default function Canvas({
     polygonPoints,
     isDrawingLine,
     linePoints,
+    isDrawingBezier,
+    bezierPoints,
     onMouseDown,
     onMouseMove,
     onMouseUp,
     onDoubleClick,
-    onErase,
     onVertexClick,
     onTextEdit,
     onTextEditCancel
 }: CanvasProps) {
-    const stageRef = useRef<any>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
+    const stageRef = useRef<Konva.Stage>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
     const [isMounted, setIsMounted] = useState(false);
@@ -72,11 +87,9 @@ export default function Canvas({
     // Auto-start editing for new text annotations
     useEffect(() => {
         if (annotations.length > lastAnnotationsLength) {
-            // Find the newest text annotation
             const textAnnotations = annotations.filter(ann => ann.type === 'text');
             if (textAnnotations.length > 0) {
                 const newestText = textAnnotations[textAnnotations.length - 1];
-                // If it's empty and we're not already editing something, start editing
                 if (newestText.text === '' && !editingTextId) {
                     setEditingTextId(newestText.id);
                     setEditingText('');
@@ -115,33 +128,33 @@ export default function Canvas({
         return () => window.removeEventListener('resize', updateSize);
     }, [isMounted]);
 
-    const getCanvasPoint = (evt?: any): Point => {
+    const getCanvasPoint = (evt?: MouseEvent): Point => {
         const stage = stageRef.current;
+        if (!stage) return { x: 0, y: 0 };
         const pointerPosition = evt ? 
             stage.getRelativePointerPosition() : 
             stage.getPointerPosition();
+        if (!pointerPosition) return { x: 0, y: 0 };
         return {
             x: pointerPosition.x,
             y: pointerPosition.y
         };
     };
 
-    const handleMouseDown = (e: any) => {
+    const handleMouseDown = (e: { evt: MouseEvent }) => {
         const point = getCanvasPoint(e.evt);
         
-        // Check for vertex clicking in polygon/polyline mode
-        if (tool === 'shape' && isDrawingPolygon && polygonPoints.length > 0 && onVertexClick) {
-            const threshold = 10; // pixels
-            
+        if (tool === 'shape' && isDrawingPolygon && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') && polygonPoints.length > 0 && onVertexClick) {
+            const threshold = 15; // Increased threshold for easier clicking
             for (let i = 0; i < polygonPoints.length; i++) {
                 const vertex = polygonPoints[i];
                 const distance = Math.sqrt(
                     Math.pow(point.x - vertex.x, 2) + Math.pow(point.y - vertex.y, 2)
                 );
-                
                 if (distance <= threshold) {
+                    console.log(`Clicked on vertex ${i}, distance: ${distance}`);
                     onVertexClick(i);
-                    return; // Don't call regular mouse down handler
+                    return;
                 }
             }
         }
@@ -149,28 +162,24 @@ export default function Canvas({
         onMouseDown({ point });
     };
 
-    const handleMouseMove = (e: any) => {
+    const handleMouseMove = (e: { evt: MouseEvent }) => {
         const point = getCanvasPoint(e.evt);
         setMousePosition(point);
         
-        // Check for vertex hovering in polygon/polyline mode
-        if (tool === 'shape' && isDrawingPolygon && polygonPoints.length > 0) {
-            const threshold = 10; // pixels
+        if (tool === 'shape' && isDrawingPolygon && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') && polygonPoints.length > 0) {
+            const threshold = 15; // Increased threshold to match click detection
             let foundVertex = false;
-            
             for (let i = 0; i < polygonPoints.length; i++) {
                 const vertex = polygonPoints[i];
                 const distance = Math.sqrt(
                     Math.pow(point.x - vertex.x, 2) + Math.pow(point.y - vertex.y, 2)
                 );
-                
                 if (distance <= threshold) {
                     setHoveredVertexIndex(i);
                     foundVertex = true;
                     break;
                 }
             }
-            
             if (!foundVertex) {
                 setHoveredVertexIndex(null);
             }
@@ -183,11 +192,6 @@ export default function Canvas({
 
     const handleMouseUp = () => {
         onMouseUp();
-    };
-
-    const handleErase = (e: any) => {
-        const point = getCanvasPoint(e.evt);
-        onErase({ point });
     };
 
     const handleTextDoubleClick = (annotationId: string, currentText: string) => {
@@ -205,14 +209,12 @@ export default function Canvas({
     };
 
     const handleTextEditSubmit = () => {
-        // Text is already updated in real-time, just exit editing mode
         setEditingTextId(null);
         setEditingText('');
         setEditingTextPosition(null);
     };
 
     const handleTextEditCancel = () => {
-        // Revert to original text
         if (editingTextId && onTextEdit) {
             const originalAnnotation = annotations.find(ann => ann.id === editingTextId);
             if (originalAnnotation && originalAnnotation.type === 'text') {
@@ -222,9 +224,7 @@ export default function Canvas({
         setEditingTextId(null);
         setEditingText('');
         setEditingTextPosition(null);
-        if (onTextEditCancel) {
-            onTextEditCancel();
-        }
+        onTextEditCancel?.();
     };
 
     const handleTextKeyDown = (e: React.KeyboardEvent) => {
@@ -243,143 +243,167 @@ export default function Canvas({
             const isHovered = hoveredId === annotation.id;
             const highlightColor = '#3b82f6';
 
-        switch (annotation.type) {
-            case 'stroke':
-                return (
-                    <Line
-                        key={annotation.id}
-                        points={annotation.points}
-                        stroke={annotation.color}
-                        strokeWidth={annotation.strokeWidth}
-                        lineCap="round"
-                        lineJoin="round"
-                        tension={0.5}
-                        shadowColor={isSelected || isHovered ? highlightColor : undefined}
-                        shadowBlur={isSelected || isHovered ? 5 : undefined}
-                        shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                    />
-                );
-
-            case 'shape':
-                if (annotation.shapeType === 'rectangle') {
+            switch (annotation.type) {
+                case 'stroke':
                     return (
-                        <Rect
+                        <Line
                             key={annotation.id}
-                            x={annotation.x}
-                            y={annotation.y}
-                            width={annotation.width}
-                            height={annotation.height}
+                            points={annotation.points}
                             stroke={annotation.color}
                             strokeWidth={annotation.strokeWidth}
-                            fill="transparent"
+                            lineCap="round"
+                            lineJoin="round"
+                            tension={0.5}
                             shadowColor={isSelected || isHovered ? highlightColor : undefined}
                             shadowBlur={isSelected || isHovered ? 5 : undefined}
                             shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
                         />
                     );
-                } else if (annotation.shapeType === 'ellipse') {
-                    return (
-                        <Ellipse
-                            key={annotation.id}
-                            x={annotation.x + annotation.width / 2}
-                            y={annotation.y + annotation.height / 2}
-                            radiusX={annotation.width / 2}
-                            radiusY={annotation.height / 2}
-                            stroke={annotation.color}
-                            strokeWidth={annotation.strokeWidth}
-                            fill="transparent"
-                            shadowColor={isSelected || isHovered ? highlightColor : undefined}
-                            shadowBlur={isSelected || isHovered ? 5 : undefined}
-                            shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                        />
-                    );
-                } else if (annotation.shapeType === 'line') {
-                    const points = annotation.points || [];
-                    if (points.length >= 4) {
-                        return (
-                            <Line
-                                key={annotation.id}
-                                points={points}
-                                stroke={annotation.color}
-                                strokeWidth={annotation.strokeWidth}
-                                lineCap="round"
-                                shadowColor={isSelected || isHovered ? highlightColor : undefined}
-                                shadowBlur={isSelected || isHovered ? 5 : undefined}
-                                shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                            />
-                        );
-                    }
-                } else if (annotation.shapeType === 'polygon' || annotation.shapeType === 'polyline') {
-                    const points = annotation.points || [];
-                    if (points.length >= 4) {
-                        return (
-                            <Line
-                                key={annotation.id}
-                                points={points}
-                                stroke={annotation.color}
-                                strokeWidth={annotation.strokeWidth}
-                                lineCap="round"
-                                lineJoin="round"
-                                closed={annotation.shapeType === 'polygon'}
-                                shadowColor={isSelected || isHovered ? highlightColor : undefined}
-                                shadowBlur={isSelected || isHovered ? 5 : undefined}
-                                shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                            />
-                        );
-                    }
-                }
-                break;
 
-            case 'text':
-                const isEditing = editingTextId === annotation.id;
-                return (
-                    <Group key={annotation.id}>
-                        {/* Dashed rectangle container when editing */}
-                        {isEditing && (
+                case 'shape':
+                    if (annotation.shapeType === 'rectangle') {
+                        return (
                             <Rect
+                                key={annotation.id}
                                 x={annotation.x}
                                 y={annotation.y}
                                 width={annotation.width}
                                 height={annotation.height}
-                                stroke="#3b82f6"
-                                strokeWidth={2}
-                                dash={[10, 5]}
+                                stroke={annotation.color}
+                                strokeWidth={annotation.strokeWidth}
                                 fill="transparent"
+                                shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
                             />
-                        )}
-                        {/* Text content with margin when editing */}
-                        <Text
-                            x={annotation.x + (isEditing ? 8 : 0)}
-                            y={annotation.y + (isEditing ? 4 : 0)}
-                            text={isEditing ? '' : annotation.text}
-                            fontSize={annotation.fontSize}
-                            fill={annotation.color}
-                            width={isEditing ? annotation.width - 16 : annotation.width}
-                            height={isEditing ? annotation.height - 12 : annotation.height}
+                        );
+                    } else if (annotation.shapeType === 'ellipse') {
+                        return (
+                            <Ellipse
+                                key={annotation.id}
+                                x={annotation.x + annotation.width / 2}
+                                y={annotation.y + annotation.height / 2}
+                                radiusX={annotation.width / 2}
+                                radiusY={annotation.height / 2}
+                                stroke={annotation.color}
+                                strokeWidth={annotation.strokeWidth}
+                                fill="transparent"
+                                shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
+                            />
+                        );
+                    } else if (annotation.shapeType === 'line') {
+                        const points = annotation.points || [];
+                        if (points.length >= 4) {
+                            return (
+                                <Line
+                                    key={annotation.id}
+                                    points={points}
+                                    stroke={annotation.color}
+                                    strokeWidth={annotation.strokeWidth}
+                                    lineCap="round"
+                                    shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                    shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                    shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
+                                />
+                            );
+                        }
+                    } else if (annotation.shapeType === 'polygon' || annotation.shapeType === 'polyline') {
+                        const points = annotation.points || [];
+                        if (points.length >= 4) {
+                            return (
+                                <Line
+                                    key={annotation.id}
+                                    points={points}
+                                    stroke={annotation.color}
+                                    strokeWidth={annotation.strokeWidth}
+                                    lineCap="round"
+                                    lineJoin="round"
+                                    closed={annotation.shapeType === 'polygon'}
+                                    shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                    shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                    shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
+                                />
+                            );
+                        }
+                    } else if (annotation.shapeType === 'bezier') {
+                        const points = annotation.points || [];
+                        if (points.length >= 6) {
+                            // Convert flat array to Point objects (3 points = 6 coordinates)
+                            const pointObjects: Point[] = [];
+                            for (let i = 0; i < 6; i += 2) {
+                                if (i + 1 < points.length) {
+                                    pointObjects.push({ x: points[i], y: points[i + 1] });
+                                }
+                            }
+                            
+                            const pathData = createBezierPath(pointObjects);
+                            
+                            return (
+                                <Path
+                                    key={annotation.id}
+                                    data={pathData}
+                                    stroke={annotation.color}
+                                    strokeWidth={annotation.strokeWidth}
+                                    lineCap="round"
+                                    shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                    shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                    shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
+                                />
+                            );
+                        }
+                    }
+                    break;
+
+                case 'text':
+                    const isEditing = editingTextId === annotation.id;
+                    return (
+                        <Group key={annotation.id}>
+                            {isEditing && (
+                                <Rect
+                                    x={annotation.x}
+                                    y={annotation.y}
+                                    width={annotation.width}
+                                    height={annotation.height}
+                                    stroke="#3b82f6"
+                                    strokeWidth={2}
+                                    dash={[10, 5]}
+                                    fill="transparent"
+                                />
+                            )}
+                            <Text
+                                x={annotation.x + (isEditing ? 8 : 0)}
+                                y={annotation.y + (isEditing ? 4 : 0)}
+                                text={isEditing ? '' : annotation.text}
+                                fontSize={annotation.fontSize}
+                                fill={annotation.color}
+                                width={isEditing ? annotation.width - 16 : annotation.width}
+                                height={isEditing ? annotation.height - 12 : annotation.height}
+                                shadowColor={isSelected || isHovered ? highlightColor : undefined}
+                                shadowBlur={isSelected || isHovered ? 5 : undefined}
+                                shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
+                                onDblClick={() => handleTextDoubleClick(annotation.id, annotation.text)}
+                            />
+                        </Group>
+                    );
+
+                case 'image':
+                    return (
+                        <KonvaImage
+                            key={annotation.id}
+                            x={annotation.x}
+                            y={annotation.y}
+                            image={annotation.image}
+                            width={annotation.width}
+                            height={annotation.height}
                             shadowColor={isSelected || isHovered ? highlightColor : undefined}
                             shadowBlur={isSelected || isHovered ? 5 : undefined}
                             shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                            onDblClick={() => handleTextDoubleClick(annotation.id, annotation.text)}
                         />
-                    </Group>
-                );
-
-            case 'image':
-                return (
-                    <KonvaImage
-                        key={annotation.id}
-                        x={annotation.x}
-                        y={annotation.y}
-                        image={annotation.image}
-                        width={annotation.width}
-                        height={annotation.height}
-                        shadowColor={isSelected || isHovered ? highlightColor : undefined}
-                        shadowBlur={isSelected || isHovered ? 5 : undefined}
-                        shadowOffset={isSelected || isHovered ? { x: 2, y: 2 } : undefined}
-                    />
-                );
-        }
-        return null;
+                    );
+            }
+            return null;
         };
     }, [selectedIds, hoveredId, editingTextId, editingText, annotations, onTextEdit]);
 
@@ -397,7 +421,7 @@ export default function Canvas({
                 ref={stageRef}
                 width={canvasSize.width}
                 height={canvasSize.height}
-                onMouseDown={tool === 'eraser' ? handleErase : handleMouseDown}
+                onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
@@ -425,7 +449,7 @@ export default function Canvas({
                     )}
                     
                     {/* Render current shape */}
-                    {tool === 'shape' && currentPoints.length === 4 && selectedShapeType !== 'polygon' && selectedShapeType !== 'polyline' && (
+                    {tool === 'shape' && currentPoints.length === 4 && selectedShapeType !== 'polygon' && selectedShapeType !== 'polyline' && selectedShapeType !== 'bezier' && (
                         <>
                             {selectedShapeType === 'rectangle' && (
                                 <Rect
@@ -470,6 +494,32 @@ export default function Canvas({
                         />
                     )}
                     
+                    {/* Render bezier curve drawing mode */}
+                    {tool === 'shape' && selectedShapeType === 'bezier' && isDrawingBezier && bezierPoints.length > 0 && (
+                        <>
+                            {/* Render bezier curve preview with current points + mouse position */}
+                            {bezierPoints.length === 1 && (
+                                <Line
+                                    points={[bezierPoints[0].x, bezierPoints[0].y, mousePosition.x, mousePosition.y]}
+                                    stroke={color}
+                                    strokeWidth={strokeWidth}
+                                    lineCap="round"
+                                    dash={[5, 5]}
+                                    opacity={0.5}
+                                />
+                            )}
+                            {bezierPoints.length === 2 && (
+                                <Path
+                                    data={createBezierPath([...bezierPoints, mousePosition])}
+                                    stroke={color}
+                                    strokeWidth={strokeWidth}
+                                    lineCap="round"
+                                    opacity={0.7}
+                                />
+                            )}
+                        </>
+                    )}
+                    
                     {/* Render current polygon/polyline */}
                     {tool === 'shape' && isDrawingPolygon && polygonPoints.length > 0 && (
                         <>
@@ -483,7 +533,7 @@ export default function Canvas({
                             />
                             
                             {/* Render preview line from last point to cursor */}
-                            {polygonPoints.length > 0 && hoveredVertexIndex === null && (
+                            {polygonPoints.length > 0 && (
                                 <Line
                                     points={[
                                         polygonPoints[polygonPoints.length - 1].x,
@@ -499,20 +549,38 @@ export default function Canvas({
                                 />
                             )}
                             
+                            {/* For polygons with 3+ points, show preview line to start point when hovering over control_point_1 */}
+                            {selectedShapeType === 'polygon' && polygonPoints.length >= 3 && hoveredVertexIndex === 0 && (
+                                <Line
+                                    points={[
+                                        mousePosition.x,
+                                        mousePosition.y,
+                                        polygonPoints[0].x,
+                                        polygonPoints[0].y
+                                    ]}
+                                    stroke="#4ade80"
+                                    strokeWidth={strokeWidth + 2}
+                                    lineCap="round"
+                                    dash={[8, 4]}
+                                    opacity={0.8}
+                                />
+                            )}
+                            
                             {/* Render vertex points */}
                             {polygonPoints.map((point, index) => {
                                 const isHovered = hoveredVertexIndex === index;
+                                const isStartPoint = index === 0 && selectedShapeType === 'polygon' && polygonPoints.length >= 3;
                                 return (
                                     <Circle
                                         key={`vertex-${index}`}
                                         x={point.x}
                                         y={point.y}
-                                        radius={isHovered ? 6 : 4}
-                                        fill={color}
-                                        stroke={isHovered ? "#ff6b6b" : "white"}
-                                        strokeWidth={isHovered ? 3 : 2}
-                                        shadowColor={isHovered ? "#ff6b6b" : undefined}
-                                        shadowBlur={isHovered ? 8 : undefined}
+                                        radius={isHovered ? 6 : (isStartPoint ? 5 : 4)}
+                                        fill={isStartPoint ? "#4ade80" : color}
+                                        stroke={isHovered ? "#ff6b6b" : (isStartPoint ? "#22c55e" : "white")}
+                                        strokeWidth={isHovered ? 3 : (isStartPoint ? 3 : 2)}
+                                        shadowColor={isHovered ? "#ff6b6b" : (isStartPoint ? "#22c55e" : undefined)}
+                                        shadowBlur={isHovered || isStartPoint ? 8 : undefined}
                                     />
                                 );
                             })}
@@ -566,7 +634,6 @@ export default function Canvas({
                     onChange={(e) => {
                         const newText = e.target.value;
                         setEditingText(newText);
-                        // Update the annotation in real-time
                         if (onTextEdit) {
                             onTextEdit(editingTextId, newText);
                         }

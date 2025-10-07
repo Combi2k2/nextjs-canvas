@@ -3,9 +3,28 @@
 import { useCallback, useEffect } from 'react';
 import { isPointInAnnotation, isAnnotationInRect, isAnnotationInEraserCircle } from '@/utils/geometry';
 import { useDrawingState } from '@/hooks/useDrawingState';
-import { Point, ShapeAnnotation, StrokeAnnotation, TextAnnotation, ImageAnnotation } from '@/types/annotations';
+import { Point, ShapeAnnotation, StrokeAnnotation, TextAnnotation, ImageAnnotation, Tool } from '@/types/annotations';
 import Canvas from './Canvas';
 import Toolbar from './Toolbar';
+
+// Helper function to create ShapeAnnotation with bounds calculation
+const createShapeAnnotation = (
+    points: Point[], 
+    shapeType: string, 
+    color: string, 
+    strokeWidth: number
+): ShapeAnnotation => ({
+    id: `shape-${Date.now()}`,
+    type: 'shape',
+    x: Math.min(...points.map(p => p.x)),
+    y: Math.min(...points.map(p => p.y)),
+    width: Math.max(...points.map(p => p.x)) - Math.min(...points.map(p => p.x)),
+    height: Math.max(...points.map(p => p.y)) - Math.min(...points.map(p => p.y)),
+    color,
+    strokeWidth,
+    shapeType: shapeType as any,
+    points: points.flatMap(p => [p.x, p.y])
+});
 
 export default function DrawingApp() {
     const {
@@ -27,6 +46,8 @@ export default function DrawingApp() {
         polygonPoints,
         isDrawingLine,
         linePoints,
+        isDrawingBezier,
+        bezierPoints,
         setTool,
         setAnnotations,
         setStrokeWidth,
@@ -42,6 +63,8 @@ export default function DrawingApp() {
         setPolygonPoints,
         setIsDrawingLine,
         setLinePoints,
+        setIsDrawingBezier,
+        setBezierPoints,
         saveToHistory,
         handleUndo,
         handleRedo,
@@ -62,19 +85,7 @@ export default function DrawingApp() {
             } else if (selectedShapeType === 'polyline') {
                 // End polyline flow by creating the annotation
                 if (polygonPoints.length >= 2) {
-                    const points = polygonPoints.flatMap(p => [p.x, p.y]);
-                    const newAnnotation: ShapeAnnotation = {
-                        id: `shape-${Date.now()}`,
-                        type: 'shape',
-                        x: Math.min(...polygonPoints.map(p => p.x)),
-                        y: Math.min(...polygonPoints.map(p => p.y)),
-                        width: Math.max(...polygonPoints.map(p => p.x)) - Math.min(...polygonPoints.map(p => p.x)),
-                        height: Math.max(...polygonPoints.map(p => p.y)) - Math.min(...polygonPoints.map(p => p.y)),
-                        color,
-                        strokeWidth,
-                        shapeType: selectedShapeType,
-                        points
-                    };
+                    const newAnnotation = createShapeAnnotation(polygonPoints, selectedShapeType, color, strokeWidth);
                     
                     setAnnotations(prev => [...prev, newAnnotation]);
                     saveToHistory([...annotations, newAnnotation]);
@@ -88,19 +99,7 @@ export default function DrawingApp() {
         if (isDrawingLine) {
             // End line flow by creating the annotation
             if (linePoints.length >= 2) {
-                const points = linePoints.flatMap(p => [p.x, p.y]);
-                const newAnnotation: ShapeAnnotation = {
-                    id: `shape-${Date.now()}`,
-                    type: 'shape',
-                    x: Math.min(...linePoints.map(p => p.x)),
-                    y: Math.min(...linePoints.map(p => p.y)),
-                    width: Math.max(...linePoints.map(p => p.x)) - Math.min(...linePoints.map(p => p.x)),
-                    height: Math.max(...linePoints.map(p => p.y)) - Math.min(...linePoints.map(p => p.y)),
-                    color,
-                    strokeWidth,
-                    shapeType: 'line',
-                    points
-                };
+                const newAnnotation = createShapeAnnotation(linePoints, 'line', color, strokeWidth);
                 
                 setAnnotations(prev => [...prev, newAnnotation]);
                 saveToHistory([...annotations, newAnnotation]);
@@ -109,8 +108,21 @@ export default function DrawingApp() {
             setLinePoints([]);
         }
         
-        setTool(newTool as any);
-    }, [isDrawingPolygon, selectedShapeType, polygonPoints, isDrawingLine, linePoints, color, strokeWidth, setAnnotations, saveToHistory, annotations, setTool]);
+        // Handle bezier curve drawing flow when switching tools
+        if (isDrawingBezier) {
+            // End bezier flow by creating the annotation
+            if (bezierPoints.length >= 4) {
+                const newAnnotation = createShapeAnnotation(bezierPoints, 'bezier', color, strokeWidth);
+                
+                setAnnotations(prev => [...prev, newAnnotation]);
+                saveToHistory([...annotations, newAnnotation]);
+            }
+            setIsDrawingBezier(false);
+            setBezierPoints([]);
+        }
+        
+        setTool(newTool as Tool);
+    }, [isDrawingPolygon, selectedShapeType, polygonPoints, isDrawingLine, linePoints, isDrawingBezier, bezierPoints, color, strokeWidth, setAnnotations, saveToHistory, annotations, setTool]);
 
     const handleMouseDown = useCallback((e: { point: Point }) => {
         const point = e.point;
@@ -134,11 +146,12 @@ export default function DrawingApp() {
         } else if (tool === 'shape') {
             if (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') {
                 if (!isDrawingPolygon) {
-                    // Start polygon/polyline
+                    // Start polygon/polyline drawing - first click sets control_point_1
                     setIsDrawingPolygon(true);
                     setPolygonPoints([point]);
                 } else {
-                    // Add point to polygon/polyline
+                    // For subsequent clicks, always add a new control point at the clicked position
+                    // This creates a new control point even if clicking on an existing one
                     setPolygonPoints(prev => [...prev, point]);
                 }
             } else if (selectedShapeType === 'line') {
@@ -153,19 +166,7 @@ export default function DrawingApp() {
                     // Complete line drawing (click-to-click mode)
                     setLinePoints(prev => [...prev, point]);
                     // Create line annotation
-                    const points = [...linePoints, point].flatMap(p => [p.x, p.y]);
-                    const newAnnotation: ShapeAnnotation = {
-                        id: `shape-${Date.now()}`,
-                        type: 'shape',
-                        x: Math.min(...[...linePoints, point].map(p => p.x)),
-                        y: Math.min(...[...linePoints, point].map(p => p.y)),
-                        width: Math.max(...[...linePoints, point].map(p => p.x)) - Math.min(...[...linePoints, point].map(p => p.x)),
-                        height: Math.max(...[...linePoints, point].map(p => p.y)) - Math.min(...[...linePoints, point].map(p => p.y)),
-                        color,
-                        strokeWidth,
-                        shapeType: 'line',
-                        points
-                    };
+                    const newAnnotation = createShapeAnnotation([...linePoints, point], 'line', color, strokeWidth);
                     
                     setAnnotations(prev => [...prev, newAnnotation]);
                     saveToHistory([...annotations, newAnnotation]);
@@ -173,6 +174,26 @@ export default function DrawingApp() {
                     setIsDrawingLine(false);
                     setLinePoints([]);
                     setIsDrawing(false);
+                }
+            } else if (selectedShapeType === 'bezier') {
+                if (!isDrawingBezier) {
+                    // Start bezier curve drawing
+                    setIsDrawingBezier(true);
+                    setBezierPoints([point]);
+                } else {
+                    // Add control point to bezier curve
+                    setBezierPoints(prev => [...prev, point]);
+                    
+                    // Complete bezier curve when we have 3 control points
+                    if (bezierPoints.length >= 2) {
+                        const newAnnotation = createShapeAnnotation([...bezierPoints, point], 'bezier', color, strokeWidth);
+                        
+                        setAnnotations(prev => [...prev, newAnnotation]);
+                        saveToHistory([...annotations, newAnnotation]);
+                        // Reset bezier drawing state
+                        setIsDrawingBezier(false);
+                        setBezierPoints([]);
+                    }
                 }
             } else {
                 // Rectangle or ellipse
@@ -182,26 +203,29 @@ export default function DrawingApp() {
         } else if (tool === 'text') {
             setSelectionRect({ x: point.x, y: point.y, width: 0, height: 0 });
             setIsDrawing(true);
+        } else if (tool === 'eraser') {
+            // Start erasing mode
+            setIsDrawing(true);
+            // Also handle the initial erase on mouse down
+            const eraserRadius = eraserSize / 2;
+            const toRemove = annotations.find(ann => isAnnotationInEraserCircle(point.x, point.y, eraserRadius, ann));
+            
+            if (toRemove) {
+                const newAnnotations = annotations.filter(ann => ann.id !== toRemove.id);
+                setAnnotations(newAnnotations);
+                saveToHistory(newAnnotations);
+            }
         }
-    }, [tool, selectedShapeType, isDrawingPolygon, isDrawingLine, linePoints, annotations, selectedIds, setDragState, setSelectionRect, setIsDrawing, setCurrentPoints, setIsDrawingPolygon, setPolygonPoints, setIsDrawingLine, setLinePoints, color, strokeWidth, setAnnotations, saveToHistory]);
+    }, [tool, selectedShapeType, isDrawingPolygon, isDrawingLine, linePoints, isDrawingBezier, bezierPoints, annotations, selectedIds, setDragState, setSelectionRect, setIsDrawing, setCurrentPoints, setIsDrawingPolygon, setPolygonPoints, setIsDrawingLine, setLinePoints, setIsDrawingBezier, setBezierPoints, color, strokeWidth, eraserSize, setAnnotations, saveToHistory]);
 
     const handleDoubleClick = useCallback((e: { point: Point }) => {
-        if (tool === 'shape' && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') && isDrawingPolygon) {
-            // End polygon/polyline drawing
-            if (polygonPoints.length >= 2) {
-                const points = polygonPoints.flatMap(p => [p.x, p.y]);
-                const newAnnotation: ShapeAnnotation = {
-                    id: `shape-${Date.now()}`,
-                    type: 'shape',
-                    x: Math.min(...polygonPoints.map(p => p.x)),
-                    y: Math.min(...polygonPoints.map(p => p.y)),
-                    width: Math.max(...polygonPoints.map(p => p.x)) - Math.min(...polygonPoints.map(p => p.x)),
-                    height: Math.max(...polygonPoints.map(p => p.y)) - Math.min(...polygonPoints.map(p => p.y)),
-                    color,
-                    strokeWidth,
-                    shapeType: selectedShapeType,
-                    points
-                };
+        // Handle polyline double-click - creates final control point and ends the flow
+        if (tool === 'shape' && selectedShapeType === 'polyline' && isDrawingPolygon) {
+            // Add the double-click point as the final control point
+            const finalPoints = [...polygonPoints, e.point];
+            
+            if (finalPoints.length >= 2) {
+                const newAnnotation = createShapeAnnotation(finalPoints, selectedShapeType, color, strokeWidth);
                 
                 setAnnotations(prev => [...prev, newAnnotation]);
                 saveToHistory([...annotations, newAnnotation]);
@@ -213,33 +237,25 @@ export default function DrawingApp() {
     }, [tool, selectedShapeType, isDrawingPolygon, polygonPoints, color, strokeWidth, setAnnotations, saveToHistory, annotations]);
 
     const handleVertexClick = useCallback((vertexIndex: number) => {
-        if (tool === 'shape' && isDrawingPolygon && polygonPoints.length > 0) {
-            // Connect to the clicked vertex and end the polygon/polyline flow
-            const points = polygonPoints.flatMap(p => [p.x, p.y]);
-            
-            // Add the clicked vertex to complete the shape
-            const clickedVertex = polygonPoints[vertexIndex];
-            points.push(clickedVertex.x, clickedVertex.y);
-            
-            const newAnnotation: ShapeAnnotation = {
-                id: `shape-${Date.now()}`,
-                type: 'shape',
-                x: Math.min(...polygonPoints.map(p => p.x)),
-                y: Math.min(...polygonPoints.map(p => p.y)),
-                width: Math.max(...polygonPoints.map(p => p.x)) - Math.min(...polygonPoints.map(p => p.x)),
-                height: Math.max(...polygonPoints.map(p => p.y)) - Math.min(...polygonPoints.map(p => p.y)),
-                color,
-                strokeWidth,
-                shapeType: selectedShapeType,
-                points
-            };
+        console.log(`handleVertexClick called with vertexIndex: ${vertexIndex}, tool: ${tool}, isDrawingPolygon: ${isDrawingPolygon}, selectedShapeType: ${selectedShapeType}, polygonPoints.length: ${polygonPoints.length}`);
+        
+        // Handle polygon completion when clicking on control_point_1 (index 0) with 3+ points
+        if (tool === 'shape' && isDrawingPolygon && selectedShapeType === 'polygon' && polygonPoints.length > 2 && vertexIndex === 0) {
+            console.log('Completing polygon by clicking on control_point_1');
+            // Complete polygon by connecting to the first control point
+            const newAnnotation = createShapeAnnotation(polygonPoints, selectedShapeType, color, strokeWidth);
             
             setAnnotations(prev => [...prev, newAnnotation]);
             saveToHistory([...annotations, newAnnotation]);
             
-            // End the polygon/polyline flow
+            // End the polygon flow
             setIsDrawingPolygon(false);
             setPolygonPoints([]);
+        } else if (tool === 'shape' && isDrawingPolygon && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline')) {
+            console.log(`Adding new control point at position of vertex ${vertexIndex}`);
+            // For all other cases, add a new control point at the same position as the clicked vertex
+            const clickedPoint = polygonPoints[vertexIndex];
+            setPolygonPoints(prev => [...prev, clickedPoint]);
         }
     }, [tool, isDrawingPolygon, polygonPoints, color, strokeWidth, selectedShapeType, setAnnotations, saveToHistory, annotations]);
 
@@ -256,9 +272,6 @@ export default function DrawingApp() {
         ));
     }, [setAnnotations, saveToHistory, annotations]);
 
-    const handleTextEditCancel = useCallback(() => {
-        // No action needed for cancel - the Canvas will handle state reset
-    }, []);
 
     // Handle keyboard shortcuts
     useEffect(() => {
@@ -301,6 +314,19 @@ export default function DrawingApp() {
             setHoveredId(null);
         }
         
+        // Handle eraser tool - works even when not in drawing mode
+        if (tool === 'eraser' && isDrawing) {
+            const eraserRadius = eraserSize / 2;
+            const toRemove = annotations.find(ann => isAnnotationInEraserCircle(point.x, point.y, eraserRadius, ann));
+            
+            if (toRemove) {
+                const newAnnotations = annotations.filter(ann => ann.id !== toRemove.id);
+                setAnnotations(newAnnotations);
+                saveToHistory(newAnnotations);
+            }
+            return;
+        }
+
         if (!isDrawing) return;
 
         if (tool === 'select' && dragState.isDragging && dragState.startPoint) {
@@ -339,6 +365,9 @@ export default function DrawingApp() {
         } else if (tool === 'shape') {
             if (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') {
                 // Don't update current points for polygon/polyline - they're handled in mouse down
+                return;
+            } else if (selectedShapeType === 'bezier') {
+                // Don't update current points for bezier - they're handled in mouse down
                 return;
             } else {
                 // Update the second point for rectangle, ellipse, line
@@ -390,7 +419,7 @@ export default function DrawingApp() {
                 setSelectionRect({ ...selectionRect, width, height });
             }
         }
-    }, [isDrawing, tool, dragState, annotations, selectedIds, selectionRect, setHoveredId, setDragState, setAnnotations, setCurrentPoints, setSelectionRect]);
+    }, [isDrawing, tool, dragState, annotations, selectedIds, selectionRect, setHoveredId, setDragState, setAnnotations, setCurrentPoints, setSelectionRect, eraserSize, saveToHistory]);
 
     const handleMouseUp = useCallback(() => {
         if (!isDrawing) return;
@@ -415,7 +444,7 @@ export default function DrawingApp() {
             setAnnotations(newAnnotations);
             saveToHistory(newAnnotations);
             setCurrentPoints([]);
-        } else if (tool === 'shape' && currentPoints.length === 4 && selectedShapeType !== 'polygon' && selectedShapeType !== 'polyline') {
+        } else if (tool === 'shape' && currentPoints.length === 4 && selectedShapeType !== 'polygon' && selectedShapeType !== 'polyline' && selectedShapeType !== 'bezier') {
             // Create rectangle, ellipse, or line (drag-and-release mode)
             const x1 = currentPoints[0];
             const y1 = currentPoints[1];
@@ -471,19 +500,8 @@ export default function DrawingApp() {
             // The text will be automatically put into editing mode by the Canvas component
         }
         setDragState(prev => ({ ...prev, startPoint: null }));
-    }, [isDrawing, dragState, tool, currentPoints, color, strokeWidth, annotations, selectionRect, saveToHistory, setAnnotations, setCurrentPoints, setSelectedIds, setSelectionRect, setDragState, setIsDrawing]);
+    }, [isDrawing, dragState, tool, currentPoints, color, strokeWidth, annotations, selectionRect, saveToHistory, setAnnotations, setCurrentPoints, setSelectedIds, setSelectionRect, setDragState, setIsDrawing, isDrawingBezier, setBezierPoints]);
 
-    const handleErase = useCallback((e: { point: Point }) => {
-        const point = e.point;
-        const eraserRadius = eraserSize / 2;
-        const toRemove = annotations.find(ann => isAnnotationInEraserCircle(point.x, point.y, eraserRadius, ann));
-        
-        if (toRemove) {
-            const newAnnotations = annotations.filter(ann => ann.id !== toRemove.id);
-            setAnnotations(newAnnotations);
-            saveToHistory(newAnnotations);
-        }
-    }, [annotations, saveToHistory, setAnnotations, eraserSize]);
 
 
     const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -551,19 +569,7 @@ export default function DrawingApp() {
                             } else if (selectedShapeType === 'polyline') {
                                 // End polyline flow by creating the annotation
                                 if (polygonPoints.length >= 2) {
-                                    const points = polygonPoints.flatMap(p => [p.x, p.y]);
-                                    const newAnnotation: ShapeAnnotation = {
-                                        id: `shape-${Date.now()}`,
-                                        type: 'shape',
-                                        x: Math.min(...polygonPoints.map(p => p.x)),
-                                        y: Math.min(...polygonPoints.map(p => p.y)),
-                                        width: Math.max(...polygonPoints.map(p => p.x)) - Math.min(...polygonPoints.map(p => p.x)),
-                                        height: Math.max(...polygonPoints.map(p => p.y)) - Math.min(...polygonPoints.map(p => p.y)),
-                                        color,
-                                        strokeWidth,
-                                        shapeType: selectedShapeType,
-                                        points
-                                    };
+                                    const newAnnotation = createShapeAnnotation(polygonPoints, selectedShapeType, color, strokeWidth);
                                     
                                     setAnnotations(prev => [...prev, newAnnotation]);
                                     saveToHistory([...annotations, newAnnotation]);
@@ -577,25 +583,26 @@ export default function DrawingApp() {
                         if (isDrawingLine) {
                             // End line flow by creating the annotation
                             if (linePoints.length >= 2) {
-                                const points = linePoints.flatMap(p => [p.x, p.y]);
-                                const newAnnotation: ShapeAnnotation = {
-                                    id: `shape-${Date.now()}`,
-                                    type: 'shape',
-                                    x: Math.min(...linePoints.map(p => p.x)),
-                                    y: Math.min(...linePoints.map(p => p.y)),
-                                    width: Math.max(...linePoints.map(p => p.x)) - Math.min(...linePoints.map(p => p.x)),
-                                    height: Math.max(...linePoints.map(p => p.y)) - Math.min(...linePoints.map(p => p.y)),
-                                    color,
-                                    strokeWidth,
-                                    shapeType: 'line',
-                                    points
-                                };
+                                const newAnnotation = createShapeAnnotation(linePoints, 'line', color, strokeWidth);
                                 
                                 setAnnotations(prev => [...prev, newAnnotation]);
                                 saveToHistory([...annotations, newAnnotation]);
                             }
                             setIsDrawingLine(false);
                             setLinePoints([]);
+                        }
+                        
+                        // Handle bezier curve drawing flow when switching shape types
+                        if (isDrawingBezier) {
+                            // End bezier flow by creating the annotation
+                            if (bezierPoints.length >= 4) {
+                                const newAnnotation = createShapeAnnotation(bezierPoints, 'bezier', color, strokeWidth);
+                                
+                                setAnnotations(prev => [...prev, newAnnotation]);
+                                saveToHistory([...annotations, newAnnotation]);
+                            }
+                            setIsDrawingBezier(false);
+                            setBezierPoints([]);
                         }
                         
                         setSelectedShapeType(newShapeType);
@@ -620,14 +627,15 @@ export default function DrawingApp() {
                         polygonPoints={polygonPoints}
                         isDrawingLine={isDrawingLine}
                         linePoints={linePoints}
+                        isDrawingBezier={isDrawingBezier}
+                        bezierPoints={bezierPoints}
                         onMouseDown={handleMouseDown}
                         onMouseMove={handleMouseMove}
                         onMouseUp={handleMouseUp}
                         onDoubleClick={handleDoubleClick}
-                        onErase={handleErase}
                         onVertexClick={handleVertexClick}
                         onTextEdit={handleTextEdit}
-                        onTextEditCancel={handleTextEditCancel}
+                        onTextEditCancel={() => {}}
                     />
                 </div>
             </div>
