@@ -14,10 +14,10 @@ import {
     Copy,
     Palette,
     Circle,
-    Triangle,
     Minus,
     Hexagon,
-    Activity
+    Activity,
+    Spline
 } from 'lucide-react';
 import { Tool, ShapeType } from '@/types/annotations';
 import { useState, useEffect, useRef } from 'react';
@@ -102,16 +102,18 @@ export default function Toolbar({
             case 'line': return Minus;
             case 'polygon': return Hexagon;
             case 'polyline': return Activity;
+            case 'bezier': return Spline;
             default: return Square;
         }
     };
 
-    const shapeTypes: { type: ShapeType; icon: any; label: string }[] = [
+    const shapeTypes: { type: ShapeType; icon: React.ComponentType<{ size: number }>; label: string }[] = [
         { type: 'rectangle', icon: Square, label: 'Rectangle' },
         { type: 'ellipse', icon: Circle, label: 'Ellipse' },
         { type: 'line', icon: Minus, label: 'Line' },
         { type: 'polygon', icon: Hexagon, label: 'Polygon' },
         { type: 'polyline', icon: Activity, label: 'Polyline' },
+        { type: 'bezier', icon: Spline, label: 'Bezier Curve' },
     ];
 
     const tools = [

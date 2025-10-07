@@ -57,6 +57,12 @@ export const isPointInAnnotation = (x: number, y: number, annotation: Annotation
                     if (dist < 10) return true;
                 }
             }
+        } else if (annotation.shapeType === 'bezier') {
+            const points = annotation.points || [];
+            if (points.length >= 6) {
+                const dist = distanceToBezierCurve(x, y, points);
+                return dist < 10;
+            }
         }
     } else if (annotation.type === 'text') {
         return x >= annotation.x && 
@@ -95,6 +101,36 @@ export const distanceToLineSegment = (x: number, y: number, x1: number, y1: numb
     const dx = x - xx;
     const dy = y - yy;
     return Math.sqrt(dx * dx + dy * dy);
+};
+
+export const distanceToBezierCurve = (x: number, y: number, points: number[]): number => {
+    if (points.length < 6) return Infinity; // Need 3 points (6 coordinates)
+    
+    // For 3-point bezier curve: P0, P1 (control), P2
+    const x1 = points[0];
+    const y1 = points[1];
+    const x2 = points[2];
+    const y2 = points[3];
+    const x3 = points[4];
+    const y3 = points[5];
+    
+    let minDistance = Infinity;
+    const numSamples = 50;
+    
+    // Sample points along the quadratic bezier curve
+    for (let i = 0; i <= numSamples; i++) {
+        const t = i / numSamples;
+        const oneMinusT = 1 - t;
+        
+        // Quadratic bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+        const bx = oneMinusT * oneMinusT * x1 + 2 * oneMinusT * t * x2 + t * t * x3;
+        const by = oneMinusT * oneMinusT * y1 + 2 * oneMinusT * t * y2 + t * t * y3;
+        
+        const distance = Math.sqrt((x - bx) * (x - bx) + (y - by) * (y - by));
+        minDistance = Math.min(minDistance, distance);
+    }
+    
+    return minDistance;
 };
 
 export const isAnnotationInRect = (annotation: Annotation, rect: SelectionRect): boolean => {
@@ -189,6 +225,12 @@ export const isAnnotationInEraserCircle = (x: number, y: number, eraserRadius: n
                     );
                     if (dist < eraserRadius) return true;
                 }
+            }
+        } else if (annotation.shapeType === 'bezier') {
+            const points = annotation.points || [];
+            if (points.length >= 6) {
+                const dist = distanceToBezierCurve(x, y, points);
+                return dist < eraserRadius;
             }
         }
     } else if (annotation.type === 'text') {

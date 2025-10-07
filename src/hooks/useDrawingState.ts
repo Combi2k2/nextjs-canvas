@@ -32,6 +32,8 @@ export const useDrawingState = () => {
     const [polygonPoints, setPolygonPoints] = useState<Point[]>([]);
     const [isDrawingLine, setIsDrawingLine] = useState(false);
     const [linePoints, setLinePoints] = useState<Point[]>([]);
+    const [isDrawingBezier, setIsDrawingBezier] = useState(false);
+    const [bezierPoints, setBezierPoints] = useState<Point[]>([]);
 
     const saveToHistory = useCallback((newAnnotations: Annotation[]) => {
         const newHistory = history.slice(0, historyStep + 1);
@@ -119,6 +121,8 @@ export const useDrawingState = () => {
         polygonPoints,
         isDrawingLine,
         linePoints,
+        isDrawingBezier,
+        bezierPoints,
         
         // Setters
         setTool,
@@ -139,6 +143,8 @@ export const useDrawingState = () => {
         setPolygonPoints,
         setIsDrawingLine,
         setLinePoints,
+        setIsDrawingBezier,
+        setBezierPoints,
         
         // Actions
         saveToHistory,
