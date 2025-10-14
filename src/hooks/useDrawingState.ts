@@ -366,6 +366,8 @@ export const useDrawingState = () => {
     const [linePoints, setLinePoints] = useState<Point[]>([]);
     const [isDrawingBezier, setIsDrawingBezier] = useState(false);
     const [bezierPoints, setBezierPoints] = useState<Point[]>([]);
+    const [aiSelectionRect, setAiSelectionRect] = useState<SelectionRect | null>(null);
+    const [aiSelectionStart, setAiSelectionStart] = useState<Point | null>(null);
 
     const saveToHistory = useCallback((newAnnotations: Annotation[]) => {
         const newHistory = history.slice(0, historyStep + 1);
@@ -458,6 +460,44 @@ export const useDrawingState = () => {
         setColor(newColor);
     }, [annotations, saveToHistory, getSelectedAnnotations]);
 
+    // AI selection functions
+    const startAiSelection = useCallback((point: Point) => {
+        if (tool === 'ai') {
+            setAiSelectionStart(point);
+            setAiSelectionRect({
+                x: point.x,
+                y: point.y,
+                width: 0,
+                height: 0
+            });
+        }
+    }, [tool]);
+
+    const updateAiSelection = useCallback((point: Point) => {
+        if (tool === 'ai' && aiSelectionStart) {
+            const rect = {
+                x: Math.min(aiSelectionStart.x, point.x),
+                y: Math.min(aiSelectionStart.y, point.y),
+                width: Math.abs(point.x - aiSelectionStart.x),
+                height: Math.abs(point.y - aiSelectionStart.y)
+            };
+            setAiSelectionRect(rect);
+        }
+    }, [tool, aiSelectionStart]);
+
+    const endAiSelection = useCallback(() => {
+        if (tool === 'ai' && aiSelectionRect && aiSelectionRect.width > 10 && aiSelectionRect.height > 10) {
+            // Return the completed rect but keep it on screen (do not clear)
+            const completedRect = { ...aiSelectionRect };
+            // Stop dragging state but keep the visual rectangle so user can see selection
+            setAiSelectionStart(null);
+            return completedRect;
+        }
+        // If selection is too small or tool changed, clear any transient state but keep existing rect if present
+        setAiSelectionStart(null);
+        return null;
+    }, [tool, aiSelectionRect]);
+
     return {
         // State
         tool,
@@ -485,6 +525,8 @@ export const useDrawingState = () => {
         linePoints,
         isDrawingBezier,
         bezierPoints,
+        aiSelectionRect,
+        aiSelectionStart,
         
         // Setters
         setTool,
@@ -514,6 +556,8 @@ export const useDrawingState = () => {
         setLinePoints,
         setIsDrawingBezier,
         setBezierPoints,
+        setAiSelectionRect,
+        setAiSelectionStart,
         
         // Actions
         saveToHistory,
@@ -529,6 +573,9 @@ export const useDrawingState = () => {
         getCursorForAnchorIndex,
         getHoveredAnchorIndex,
         calculateBounds,
+        startAiSelection,
+        updateAiSelection,
+        endAiSelection,
         
         // Computed values
         canUndo: historyStep > 0,

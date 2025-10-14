@@ -17,7 +17,8 @@ import {
     Minus,
     Hexagon,
     Activity,
-    Spline
+    Spline,
+    Sparkles
 } from 'lucide-react';
 import { Tool, ShapeType } from '@/types/annotations';
 import { useState, useEffect, useRef } from 'react';
@@ -121,7 +122,8 @@ export default function Toolbar({
         { id: 'brush' as Tool, icon: Pencil, label: 'Brush' },
         { id: 'shape' as Tool, icon: getShapeIcon(selectedShapeType), label: 'Shape' },
         { id: 'text' as Tool, icon: Type, label: 'Text' },
-        { id: 'eraser' as Tool, icon: Eraser, label: 'Eraser' }
+        { id: 'eraser' as Tool, icon: Eraser, label: 'Eraser' },
+        { id: 'ai' as Tool, icon: Sparkles, label: 'AI Assistant' }
     ];
 
     const ToolIcon = ({ 

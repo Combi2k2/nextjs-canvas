@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { isPointInAnnotation, isAnnotationInRect, isAnnotationInEraserCircle } from '@/utils/geometry';
 
 // Helper functions for control point detection
@@ -99,6 +99,7 @@ const createShapeAnnotation = (
 };
 
 export default function DrawingApp() {
+    const [aiGeneratedImages, setAiGeneratedImages] = useState<string[] | null>(null);
     const {
         tool,
         annotations,
@@ -160,13 +161,26 @@ export default function DrawingApp() {
         handleDuplicate,
         handleColorChange,
         canUndo,
-        canRedo
+        canRedo,
+        aiSelectionRect,
+        aiSelectionStart,
+        startAiSelection,
+        updateAiSelection,
+        endAiSelection,
+        setAiSelectionRect,
+        setAiSelectionStart
     } = useDrawingState();
 
     const handleToolChange = useCallback((newTool: string) => {
         // Clear all selections and editing states when switching away from selection tool
         if (tool === 'select' && newTool !== 'select') {
             clearSelection();
+        }
+        
+        // Clear AI selection when switching away from AI tool
+        if (tool === 'ai' && newTool !== 'ai') {
+            setAiSelectionRect(null);
+            setAiSelectionStart(null);
         }
         
         // Handle polygon/polyline flow when switching tools
@@ -800,6 +814,29 @@ export default function DrawingApp() {
         // TODO: Implement download functionality
     }, []);
 
+    const handleApplyGeneratedImage = useCallback((dataUrl: string) => {
+        const img = new Image();
+        img.onload = () => {
+            const baseImage: Omit<ImageAnnotation, 'isEditing' | 'isSelected' | 'bound'> = {
+                id: `image-${Date.now()}`,
+                type: 'image',
+                image: img,
+                x: 100,
+                y: 100,
+                width: Math.min(img.width, 512),
+                height: Math.min(img.height, 512) * (img.width > 0 ? Math.min(img.width, 512) / img.width : 1),
+                color: '#000000',
+                strokeWidth: 0
+            };
+            const newImage = createAnnotation(baseImage);
+            const newAnnotations = [...annotations, newImage];
+            setAnnotations(newAnnotations);
+            saveToHistory(newAnnotations);
+            setAiGeneratedImages(null);
+        };
+        img.src = dataUrl;
+    }, [annotations, createAnnotation, saveToHistory, setAnnotations]);
+
     return (
         <div className="w-full min-h-screen app-background flex flex-col">
             <div className="relative z-50">
@@ -871,6 +908,21 @@ export default function DrawingApp() {
                         setSelectedShapeType(newShapeType);
                     }}
                 />
+                {aiGeneratedImages && aiGeneratedImages.length > 0 && (
+                    <div className="ai-gallery">
+                        <div className="ai-gallery-header">
+                            <span className="ai-gallery-title">AI Results</span>
+                            <button className="ai-gallery-close" onClick={() => setAiGeneratedImages(null)} aria-label="Close AI results">×</button>
+                        </div>
+                        <div className="ai-gallery-row">
+                            {aiGeneratedImages.map((src, idx) => (
+                                <button key={idx} className="ai-thumb" onClick={() => handleApplyGeneratedImage(src)} title="Apply to canvas">
+                                    <img src={src} alt={`AI ${idx+1}`} />
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="flex-1 flex items-center justify-center p-6 relative z-0">
@@ -903,6 +955,11 @@ export default function DrawingApp() {
                         onVertexClick={handleVertexClick}
                         onTextEdit={handleTextEdit}
                         onTextEditCancel={() => {}}
+                        aiSelectionRect={aiSelectionRect}
+                        startAiSelection={startAiSelection}
+                        updateAiSelection={updateAiSelection}
+                        endAiSelection={endAiSelection}
+                        onAiImagesGenerated={(imgs) => setAiGeneratedImages(imgs)}
                     />
                 </div>
             </div>

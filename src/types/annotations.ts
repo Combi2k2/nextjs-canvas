@@ -97,7 +97,7 @@ export interface ResizeState {
     originalAnnotation: Annotation | null;
 }
 
-export type Tool = 'select' | 'brush' | 'shape' | 'text' | 'image' | 'eraser';
+export type Tool = 'select' | 'brush' | 'shape' | 'text' | 'image' | 'eraser' | 'ai';
 export type ShapeType = 'rectangle' | 'ellipse' | 'polygon' | 'polyline' | 'line' | 'bezier';
 
 export interface DrawingState {

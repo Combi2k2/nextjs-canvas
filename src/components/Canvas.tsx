@@ -6,6 +6,27 @@ import { Stage, Layer, Line, Circle, Rect, Text, Image as KonvaImage, Ellipse, G
 import Konva from 'konva';
 import { Annotation, Point, ShapeType, Bounds } from '@/types/annotations';
 import { calculateBounds } from '@/hooks/useDrawingState';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import AiChatbox from './AiChatbox';
+
+const GOOGLE_APIKEY = process.env.NEXT_PUBLIC_GOOGLE_APIKEY;
+const SYSTEM_PROMPT = `
+You are an image generation model specialized in creating visuals that emulate the aesthetic of a digital canvas drawing app. When a user requests an image, whether it's a new creation or a refinement of an existing one:
+
+1.  **Refined Canvas App Aesthetic Priority:** Always ensure the generated images look like they were drawn with care and precision in a digital canvas application, aiming for a clean and attractive illustrative style. This includes:
+*   **Clear, often bold outlines:** Objects should be defined by distinct, mostly smooth lines (can be black or a contrasting color).
+*   **Flat, solid color fills:** Avoid complex gradients or photorealistic textures. Colors should be blocky and consistent within defined areas.
+*   **Stylized and clear forms:** Represent objects with well-defined, easily recognizable, and appealingly stylized shapes. Maintain visual clarity and good design principles.
+*   **Thoughtful, minimal shading (if any):** If shading is present, it should be simple cell shading (hard transitions between different color blocks) rather than subtle gradients or realistic light play.
+*   **Non-photorealistic style:** The output should clearly be an illustration or drawing, not a photograph or a highly detailed render.
+*   **Clean backgrounds:** Backgrounds should be as closed to the given background as possible.
+
+2.  **User Prompt Adherence & Refinement:** Carefully interpret the user's request. If an input image is provided for refinement, identify the core elements and suggested improvements. If a text prompt is given, create a new image that directly reflects the description while adhering strictly to the canvas app style.
+
+3.  **Multiple Options for User Choice:** Generate **3 to 5 distinct variations** of the requested image. Each variation should offer a slightly different perspective, composition, or interpretation of the prompt, allowing the user to select their preferred outcome. Ensure all variations maintain the canvas app aesthetic.
+
+4.  **Formatting:** Present the images clearly, preferably in a sequential format, ready for the user's review.`
+
 
 // Helper function to create SVG path for 3-point bezier curve
 const createBezierPath = (points: Point[]): string => {
@@ -47,6 +68,11 @@ interface CanvasProps {
     onVertexClick?: (vertexIndex: number) => void;
     onTextEdit?: (annotationId: string, newText: string) => void;
     onTextEditCancel?: () => void;
+    aiSelectionRect?: { x: number; y: number; width: number; height: number } | null;
+    startAiSelection?: (point: Point) => void;
+    updateAiSelection?: (point: Point) => void;
+    endAiSelection?: () => any;
+    onAiImagesGenerated?: (images: string[]) => void;
 }
 
 export default function Canvas({
@@ -76,7 +102,12 @@ export default function Canvas({
     onDoubleClick,
     onVertexClick,
     onTextEdit,
-    onTextEditCancel
+    onTextEditCancel,
+    aiSelectionRect,
+    startAiSelection,
+    updateAiSelection,
+    endAiSelection,
+    onAiImagesGenerated
 }: CanvasProps) {
     const stageRef = useRef<Konva.Stage>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -89,6 +120,10 @@ export default function Canvas({
     const [lastAnnotationsLength, setLastAnnotationsLength] = useState(0);
     const [editingTextPosition, setEditingTextPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const doubleClickPendingRef = useRef<boolean>(false);
+    const [showAiChatbox, setShowAiChatbox] = useState(false);
+    const [aiChatboxPosition, setAiChatboxPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const [capturedImage, setCapturedImage] = useState<string | null>(null);
+    const [lastMousePosition, setLastMousePosition] = useState<Point>({ x: 0, y: 0 });
 
     // Handle client-side mounting
     useEffect(() => {
@@ -202,6 +237,12 @@ export default function Canvas({
             }
         }
         
+        // Handle AI tool selection
+        if (tool === 'ai' && startAiSelection) {
+            startAiSelection(point);
+            return;
+        }
+        
         onMouseDown({ 
             point, 
             ctrlKey: e.evt.ctrlKey, 
@@ -212,6 +253,7 @@ export default function Canvas({
     const handleMouseMove = (e: { evt: MouseEvent }) => {
         const point = getCanvasPoint(e.evt);
         setMousePosition(point);
+        setLastMousePosition(point);
         
         if (tool === 'shape' && isDrawingPolygon && (selectedShapeType === 'polygon' || selectedShapeType === 'polyline') && polygonPoints.length > 0) {
             const threshold = 15; // Increased threshold to match click detection
@@ -234,10 +276,32 @@ export default function Canvas({
             setHoveredVertexIndex(null);
         }
         
+        // Handle AI tool selection update
+        if (tool === 'ai' && updateAiSelection && aiSelectionRect) {
+            updateAiSelection(point);
+        }
+        
         onMouseMove({ point, shiftKey: e.evt.shiftKey });
     };
 
     const handleMouseUp = () => {
+        // Handle AI tool selection completion
+        if (tool === 'ai' && endAiSelection) {
+            const completedRect = endAiSelection();
+            if (completedRect) {
+                // Capture image from the selected area
+                const imageData = captureImageFromCanvas(completedRect);
+                if (imageData) {
+                    setCapturedImage(imageData);
+                    setAiChatboxPosition({
+                        x: canvasSize.width / 2,
+                        y: canvasSize.height / 2
+                    });
+                    setShowAiChatbox(true);
+                }
+            }
+        }
+        
         onMouseUp();
     };
 
@@ -283,6 +347,125 @@ export default function Canvas({
             handleTextEditCancel();
         }
     };
+
+    // AI image capture function
+    const captureImageFromCanvas = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
+        const stage = stageRef.current;
+        if (!stage) return null;
+
+        try {
+            // Create a temporary stage with only the selected area
+            const tempStage = new Konva.Stage({
+                container: document.createElement('div'),
+                width: rect.width,
+                height: rect.height,
+            });
+
+            const tempLayer = new Konva.Layer();
+            tempStage.add(tempLayer);
+
+            // Clone and position all annotations within the selection area
+            const stageLayer = stage.getLayers()[0];
+            stageLayer.getChildren().forEach((node: any) => {
+                if (node.getClassName() !== 'Stage') {
+                    const cloned = node.clone();
+                    cloned.position({
+                        x: node.x() - rect.x,
+                        y: node.y() - rect.y,
+                    });
+                    tempLayer.add(cloned);
+                }
+            });
+
+            tempLayer.draw();
+            
+            // Convert to data URL
+            const dataURL = tempStage.toDataURL({
+                x: 0,
+                y: 0,
+                width: rect.width,
+                height: rect.height,
+                mimeType: 'image/png',
+                quality: 1,
+            });
+
+            // Clean up
+            tempStage.destroy();
+            
+            return dataURL;
+        } catch (error) {
+            console.error('Error capturing image:', error);
+            return null;
+        }
+    }, []);
+
+    // AI functions
+    const handleAiPrompt = useCallback(async (prompt: string) => {
+        if (!GOOGLE_APIKEY) {
+            alert('API key is not set. Please set NEXT_PUBLIC_GOOGLE_APIKEY in your environment variables.');
+            return;
+        }
+
+        try {
+            const genAI = new GoogleGenerativeAI(GOOGLE_APIKEY);
+            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-image" });
+
+            // Prepare the content for the AI request
+            const contents = [];
+            
+            if (capturedImage) {
+                contents.push(
+                    { text: SYSTEM_PROMPT },
+                    { text: prompt },
+                    { 
+                        inlineData: {
+                            mimeType: 'image/png',
+                            data: capturedImage.split(',')[1] // Remove the data URL prefix
+                        }
+                    }
+                );
+            } else {
+                contents.push(
+                    { text: SYSTEM_PROMPT },
+                    { text: prompt }
+                )
+            }
+
+            // Non-streaming call; only collect images
+            const result = await model.generateContent(contents);
+            const generatedImages: string[] = [];
+            const candidates = (result as any)?.response?.candidates || (result as any)?.candidates || [];
+            for (const cand of candidates) {
+                const parts = cand?.content?.parts || [];
+                for (const part of parts) {
+                    if (part.inlineData?.data && part.inlineData?.mimeType?.startsWith('image/')) {
+                        const imageDataUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                        generatedImages.push(imageDataUrl);
+                    }
+                }
+            }
+
+            if (generatedImages.length > 0) {
+                onAiImagesGenerated?.(generatedImages);
+            }
+
+        } catch (error) {
+            console.error('Error calling AI service:', error);
+            alert(`Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
+        } finally {
+            // Clean up
+            setShowAiChatbox(false);
+            setCapturedImage(null);
+        }
+    }, [capturedImage, onAiImagesGenerated]);
+
+    const handleVoiceStart = useCallback(() => {
+        console.log('Voice recognition started');
+    }, []);
+
+    const handleVoiceEnd = useCallback(() => {
+        console.log('Voice recognition ended');
+    }, []);
 
     const renderAnnotation = useMemo(() => {
         return (annotation: Annotation) => {
@@ -598,7 +781,11 @@ export default function Canvas({
                             ? 'move' 
                             : tool === 'eraser' 
                                 ? 'none' 
-                                : 'crosshair' 
+                                : tool === 'ai' && !aiSelectionRect
+                                    ? 'crosshair'
+                                    : tool === 'ai' && aiSelectionRect
+                                        ? 'crosshair'
+                                        : 'crosshair' 
                 }}
             >
                 <Layer>
@@ -778,6 +965,20 @@ export default function Canvas({
                         />
                     )}
                     
+                    {/* Render AI selection rectangle */}
+                    {tool === 'ai' && aiSelectionRect && (
+                        <Rect
+                            x={aiSelectionRect.x}
+                            y={aiSelectionRect.y}
+                            width={aiSelectionRect.width}
+                            height={aiSelectionRect.height}
+                            stroke="#9333ea"
+                            strokeWidth={2}
+                            dash={[8, 4]}
+                            fill="rgba(147, 51, 234, 0.1)"
+                        />
+                    )}
+                    
                     {/* Render eraser circle */}
                     {tool === 'eraser' && (
                         <Circle
@@ -819,6 +1020,22 @@ export default function Canvas({
                     onKeyDown={handleTextKeyDown}
                     onBlur={handleTextEditSubmit}
                     autoFocus
+                />
+            )}
+            
+            {/* AI Chatbox */}
+            {showAiChatbox && (
+                <AiChatbox
+                    x={aiChatboxPosition.x}
+                    y={aiChatboxPosition.y}
+                    onClose={() => {
+                        setShowAiChatbox(false);
+                        setCapturedImage(null);
+                    }}
+                    onSubmit={handleAiPrompt}
+                    onVoiceStart={handleVoiceStart}
+                    onVoiceEnd={handleVoiceEnd}
+                    isVoiceSupported={typeof window !== 'undefined' && 'webkitSpeechRecognition' in window}
                 />
             )}
         </div>
