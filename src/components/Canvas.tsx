@@ -19,7 +19,7 @@ You are an image generation model specialized in creating visuals that emulate t
 *   **Stylized and clear forms:** Represent objects with well-defined, easily recognizable, and appealingly stylized shapes. Maintain visual clarity and good design principles.
 *   **Thoughtful, minimal shading (if any):** If shading is present, it should be simple cell shading (hard transitions between different color blocks) rather than subtle gradients or realistic light play.
 *   **Non-photorealistic style:** The output should clearly be an illustration or drawing, not a photograph or a highly detailed render.
-*   **Clean backgrounds:** Backgrounds should be as closed to the given background as possible.
+*   **Transparent backgrounds:** Backgrounds should be transparent so other objects from original canvas can still be visible.
 
 2.  **User Prompt Adherence & Refinement:** Carefully interpret the user's request. If an input image is provided for refinement, identify the core elements and suggested improvements. If a text prompt is given, create a new image that directly reflects the description while adhering strictly to the canvas app style.
 

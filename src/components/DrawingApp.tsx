@@ -254,13 +254,13 @@ export default function DrawingApp() {
             }
             
             // Check if clicking on an anchor point for resizing
-            if (selectedAnnotations.length === 1 && selectedAnnotations[0].isEditing) {
+            if (selectedAnnotations.length === 1) {
                 const selectedAnnotation = selectedAnnotations[0];
                 const anchorClick = isAnchorPointClick(point.x, point.y, selectedAnnotation);
                 if (anchorClick.isClick && anchorClick.anchorIndex !== null) {
                     console.log('anchorClick:', point.x, point.y);
-                    // Create a deep copy of the annotation
-                    const originalAnnotation = JSON.parse(JSON.stringify(selectedAnnotation));
+                    // Preserve original annotation reference (avoid JSON cloning to keep image element)
+                    const originalAnnotation = selectedAnnotation;
                     setResizeState({
                         isResizing: true,
                         startPoint: point,
@@ -485,7 +485,7 @@ export default function DrawingApp() {
             
             // Check for anchor point hover on all selected and editing annotations
             let anchorHoverFound = false;
-            if (hovered && hovered.isSelected && hovered.isEditing) {
+            if (hovered && hovered.isSelected) {
                 const anchorIndex = getHoveredAnchorIndex(point.x, point.y, hovered);
                 if (anchorIndex !== null) {
                     setHoveredAnchorIndex(anchorIndex);
@@ -496,7 +496,7 @@ export default function DrawingApp() {
             // If no hover found from the main hover detection, check all selected editing annotations
             // This handles cases where the mouse is over anchor points but not the annotation itself
             if (!anchorHoverFound) {
-                const selectedEditingAnnotations = annotations.filter(ann => ann.isSelected && ann.isEditing);
+                const selectedEditingAnnotations = annotations.filter(ann => ann.isSelected);
                 for (const annotation of selectedEditingAnnotations) {
                     const anchorIndex = getHoveredAnchorIndex(point.x, point.y, annotation);
                     if (anchorIndex !== null) {
