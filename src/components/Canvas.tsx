@@ -127,6 +127,19 @@ export default function Canvas({
     const [aiChatboxPosition, setAiChatboxPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [lastMousePosition, setLastMousePosition] = useState<Point>({ x: 0, y: 0 });
+    const [touchState, setTouchState] = useState<{
+        isGesturing: boolean;
+        initialDistance: number;
+        initialScale: number;
+        initialCenter: Point;
+        lastTouches: React.Touch[];
+    }>({
+        isGesturing: false,
+        initialDistance: 0,
+        initialScale: 1,
+        initialCenter: { x: 0, y: 0 },
+        lastTouches: []
+    });
 
     // Handle client-side mounting
     useEffect(() => {
@@ -186,7 +199,7 @@ export default function Canvas({
         return () => window.removeEventListener('resize', updateSize);
     }, [isMounted]);
 
-    const getCanvasPoint = (evt?: MouseEvent): Point => {
+    const getCanvasPoint = (evt?: MouseEvent | TouchEvent): Point => {
         const stage = stageRef.current;
         if (!stage) return { x: 0, y: 0 };
         const pointerPosition = evt ? 
@@ -196,6 +209,51 @@ export default function Canvas({
         return {
             x: pointerPosition.x,
             y: pointerPosition.y
+        };
+    };
+
+    // Helper function to get touch point from touch event
+    const getTouchPoint = (touch: React.Touch): Point => {
+        const stage = stageRef.current;
+        if (!stage) return { x: 0, y: 0 };
+        
+        const stageBox = stage.container().getBoundingClientRect();
+        const scaleX = stage.width() / stageBox.width;
+        const scaleY = stage.height() / stageBox.height;
+        
+        return {
+            x: (touch.clientX - stageBox.left) * scaleX,
+            y: (touch.clientY - stageBox.top) * scaleY
+        };
+    };
+
+    // Helper function to get pressure from touch event (if supported)
+    const getTouchPressure = (touch: React.Touch): number => {
+        // Check if pressure is supported (mainly for stylus input)
+        if ('force' in touch && typeof (touch as any).force === 'number') {
+            return Math.max(0.1, Math.min(1, (touch as any).force));
+        }
+        // Fallback: simulate pressure based on touch area (if available)
+        if ('radiusX' in touch && 'radiusY' in touch) {
+            const area = Math.PI * (touch as any).radiusX * (touch as any).radiusY;
+            const maxArea = Math.PI * 20 * 20; // Assume max radius of 20
+            return Math.max(0.1, Math.min(1, area / maxArea));
+        }
+        return 1; // Default pressure
+    };
+
+    // Helper function to calculate distance between two touches
+    const getTouchDistance = (touch1: React.Touch, touch2: React.Touch): number => {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    // Helper function to calculate center point between two touches
+    const getTouchCenter = (touch1: React.Touch, touch2: React.Touch): Point => {
+        return {
+            x: (touch1.clientX + touch2.clientX) / 2,
+            y: (touch1.clientY + touch2.clientY) / 2
         };
     };
 
@@ -311,6 +369,164 @@ export default function Canvas({
     const handleMouseUp = () => {
         // AI tool now uses click-to-capture instead of drag selection
         onMouseUp();
+    };
+
+    // Touch event handlers
+    const handleTouchStart = (e: any) => {
+        const touchEvent = e.evt as TouchEvent;
+        touchEvent.preventDefault(); // Prevent scrolling and other default touch behaviors
+        
+        if (touchEvent.touches.length === 1) {
+            const touch = touchEvent.touches[0] as React.Touch;
+            const point = getTouchPoint(touch);
+            const pressure = getTouchPressure(touch);
+            
+            // Reset gesture state
+            setTouchState(prev => ({
+                ...prev,
+                isGesturing: false,
+                lastTouches: [touch]
+            }));
+            
+            // For drawing tools, adjust stroke width based on pressure
+            if (tool === 'brush' && pressure !== 1) {
+                // Store original stroke width and apply pressure-based scaling
+                const pressureAdjustedWidth = strokeWidth * pressure;
+                // This would need to be passed to the drawing state
+                // For now, we'll simulate the mouse event normally
+            }
+            
+            // Simulate mouse down event
+            const mockMouseEvent = {
+                ...touchEvent,
+                ctrlKey: false,
+                metaKey: false,
+                shiftKey: false,
+                button: 0,
+                buttons: 1,
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                pageX: touch.pageX,
+                pageY: touch.pageY,
+                screenX: touch.screenX,
+                screenY: touch.screenY,
+                movementX: 0,
+                movementY: 0,
+                relatedTarget: null,
+                getModifierState: () => false,
+                initMouseEvent: () => {},
+                which: 1,
+                detail: 0
+            } as unknown as MouseEvent;
+            
+            handleMouseDown({ evt: mockMouseEvent });
+        } else if (touchEvent.touches.length === 2) {
+            // Start pinch gesture
+            const touch1 = touchEvent.touches[0] as React.Touch;
+            const touch2 = touchEvent.touches[1] as React.Touch;
+            const distance = getTouchDistance(touch1, touch2);
+            const center = getTouchCenter(touch1, touch2);
+            
+            setTouchState(prev => ({
+                ...prev,
+                isGesturing: true,
+                initialDistance: distance,
+                initialScale: 1,
+                initialCenter: center,
+                lastTouches: [touch1, touch2]
+            }));
+        }
+    };
+
+    const handleTouchMove = (e: any) => {
+        const touchEvent = e.evt as TouchEvent;
+        touchEvent.preventDefault(); // Prevent scrolling
+        
+        if (touchEvent.touches.length === 1 && !touchState.isGesturing) {
+            const touch = touchEvent.touches[0] as React.Touch;
+            const point = getTouchPoint(touch);
+            
+            // Simulate mouse move event
+            const mockMouseMoveEvent = {
+                ...touchEvent,
+                shiftKey: false,
+                button: 0,
+                buttons: 1,
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                pageX: touch.pageX,
+                pageY: touch.pageY,
+                screenX: touch.screenX,
+                screenY: touch.screenY,
+                movementX: 0,
+                movementY: 0,
+                relatedTarget: null,
+                getModifierState: () => false,
+                initMouseEvent: () => {},
+                which: 1,
+                detail: 0
+            } as unknown as MouseEvent;
+            
+            handleMouseMove({ evt: mockMouseMoveEvent });
+        } else if (touchEvent.touches.length === 2 && touchState.isGesturing) {
+            // Handle pinch gesture
+            const touch1 = touchEvent.touches[0] as React.Touch;
+            const touch2 = touchEvent.touches[1] as React.Touch;
+            const currentDistance = getTouchDistance(touch1, touch2);
+            const currentCenter = getTouchCenter(touch1, touch2);
+            
+            // Calculate scale change
+            const scaleChange = currentDistance / touchState.initialDistance;
+            
+            // Apply zoom to the stage
+            const stage = stageRef.current;
+            if (stage) {
+                const newScale = Math.max(0.1, Math.min(5, scaleChange));
+                stage.scale({ x: newScale, y: newScale });
+                
+                // Adjust position to zoom around the center point
+                const stageBox = stage.container().getBoundingClientRect();
+                const centerX = (currentCenter.x - stageBox.left) * (stage.width() / stageBox.width);
+                const centerY = (currentCenter.y - stageBox.top) * (stage.height() / stageBox.height);
+                
+                const offsetX = centerX - centerX * newScale;
+                const offsetY = centerY - centerY * newScale;
+                
+                stage.position({
+                    x: stage.x() + offsetX,
+                    y: stage.y() + offsetY
+                });
+            }
+            
+            setTouchState(prev => ({
+                ...prev,
+                lastTouches: [touch1, touch2]
+            }));
+        }
+    };
+
+    const handleTouchEnd = (e: any) => {
+        const touchEvent = e.evt as TouchEvent;
+        touchEvent.preventDefault(); // Prevent default touch behaviors
+        
+        if (touchEvent.touches.length === 0) {
+            // All touches ended
+            setTouchState(prev => ({
+                ...prev,
+                isGesturing: false,
+                lastTouches: []
+            }));
+            
+            // Simulate mouse up event
+            handleMouseUp();
+        } else if (touchEvent.touches.length === 1 && touchState.isGesturing) {
+            // One finger lifted during gesture - continue with single touch
+            setTouchState(prev => ({
+                ...prev,
+                isGesturing: false,
+                lastTouches: [touchEvent.touches[0] as React.Touch]
+            }));
+        }
     };
 
     const handleTextDoubleClick = (annotationId: string, currentText: string) => {
@@ -667,12 +883,13 @@ export default function Canvas({
                             key={`control-${annotation.id}-${pointIndex}`}
                             x={points[i]}
                             y={points[i + 1]}
-                            radius={isEditing ? 8 : 6}
+                            radius={isEditing ? 12 : 10}
                             fill={isEditing ? "#ff6b6b" : "#3b82f6"}
                             stroke="white"
                             strokeWidth={2}
                             shadowColor={isEditing ? "#ff6b6b" : "#3b82f6"}
                             shadowBlur={8}
+                            opacity={0.9}
                         />
                     );
                 }
@@ -730,7 +947,9 @@ export default function Canvas({
         if (tool !== 'select' || !annotation.isSelected) return null;
         
         const { x, y, width, height } = calculateBounds(annotation);
-        const anchorSize = 8;
+        // Use larger anchor size for touch devices
+        const anchorSize = 12;
+        const touchPadding = 4; // Extra padding for touch targets
         
         // Define anchor points: 8 points around the rectangle
         const anchors = [
@@ -749,12 +968,13 @@ export default function Canvas({
                 key={`anchor-${annotation.id}-${index}`}
                 x={anchor.x + anchorSize/2}
                 y={anchor.y + anchorSize/2}
-                radius={anchorSize/2}
+                radius={anchorSize/2 + touchPadding}
                 fill="#3b82f6"
                 stroke="white"
                 strokeWidth={2}
                 shadowColor="#3b82f6"
-                shadowBlur={4}
+                shadowBlur={6}
+                opacity={0.8}
             />
         ));
     }, [tool]);
@@ -778,6 +998,9 @@ export default function Canvas({
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 onDblClick={(e) => {
                     const point = getCanvasPoint(e.evt);
                     // Clear the double-click pending flag
@@ -794,7 +1017,8 @@ export default function Canvas({
                                 ? 'none' 
                                 : tool === 'ai'
                                     ? 'pointer'
-                                    : 'crosshair' 
+                                    : 'crosshair',
+                    touchAction: 'none' // Prevent default touch behaviors
                 }}
             >
                 <Layer>
