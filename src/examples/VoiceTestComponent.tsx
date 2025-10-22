@@ -104,7 +104,7 @@ export const VoiceTestComponent: React.FC = () => {
         {voiceState.interimTranscript && (
           <div>
             <strong>Interim:</strong> 
-            <span style={{ color: '#007bff', fontStyle: 'italic' }}> "{voiceState.interimTranscript}"</span>
+            <span style={{ color: '#007bff', fontStyle: 'italic' }}> &quot;{voiceState.interimTranscript}&quot;</span>
           </div>
         )}
         
@@ -127,10 +127,10 @@ export const VoiceTestComponent: React.FC = () => {
       <div style={{ marginTop: '20px', fontSize: '14px', color: '#666' }}>
         <h4>Instructions:</h4>
         <ul>
-          <li>Click "Start Listening" to begin voice recognition</li>
+          <li>Click &quot;Start Listening&quot; to begin voice recognition</li>
           <li>Speak clearly into your microphone</li>
           <li>Watch the real-time transcript update as you speak</li>
-          <li>Click "Stop Listening" to end voice recognition</li>
+          <li>Click &quot;Stop Listening&quot; to end voice recognition</li>
           <li>Note: onVoiceEnd is only triggered by explicit stop, not speech pauses</li>
         </ul>
       </div>

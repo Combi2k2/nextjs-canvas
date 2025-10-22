@@ -476,7 +476,7 @@ export default function Canvas({
     }, []);
 
     const renderAnnotation = useMemo(() => {
-        return (annotation: Annotation) => {
+        const AnnotationRenderer = (annotation: Annotation) => {
             const isSelected = tool === 'select' && annotation.isSelected;
             const isHovered = hoveredId === annotation.id;
             const highlightColor = '#3b82f6';
@@ -643,6 +643,9 @@ export default function Canvas({
             }
             return null;
         };
+        
+        AnnotationRenderer.displayName = 'AnnotationRenderer';
+        return AnnotationRenderer;
     }, [tool, hoveredId, editingTextId, editingText, annotations, onTextEdit]);
 
     const renderControlPoints = useCallback((annotation: Annotation) => {

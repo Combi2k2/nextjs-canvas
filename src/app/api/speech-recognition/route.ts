@@ -1,7 +1,7 @@
 // Server-side API endpoint for Google Cloud Speech API
-// This would go in pages/api/speech-recognition.ts or app/api/speech-recognition/route.ts
+// App Router format for Next.js 15
 
-import { NextApiRequest, NextApiResponse } from 'next';
+import { NextRequest, NextResponse } from 'next/server';
 import { SpeechClient } from '@google-cloud/speech';
 
 // Initialize Google Cloud Speech client
@@ -13,25 +13,22 @@ const speechClient = new SpeechClient({
   // credentials: JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS || '{}')
 });
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+export async function POST(request: NextRequest) {
   try {
-    const { audio, apiKey } = req.body;
+    const body = await request.json();
+    const { audio, apiKey } = body;
     
     if (!audio) {
-      return res.status(400).json({ error: 'No audio data provided' });
+      return NextResponse.json({ error: 'No audio data provided' }, { status: 400 });
     }
 
     // Verify API key if needed
     if (process.env.SPEECH_API_KEY && apiKey !== process.env.SPEECH_API_KEY) {
-      return res.status(401).json({ error: 'Invalid API key' });
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
     }
 
     // Configure the request
-    const request = {
+    const speechRequest = {
       config: {
         encoding: 'WEBM_OPUS' as const,
         sampleRateHertz: 16000,
@@ -46,24 +43,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
 
     // Perform the speech recognition
-    const [response] = await speechClient.recognize(request);
+    const [response] = await speechClient.recognize(speechRequest);
     
     const transcription = response.results
       ?.map(result => result.alternatives?.[0]?.transcript)
       .filter(Boolean)
       .join(' ') || '';
 
-    res.status(200).json({
+    return NextResponse.json({
       transcript: transcription,
       confidence: response.results?.[0]?.alternatives?.[0]?.confidence || 0
     });
 
   } catch (error) {
     console.error('Speech recognition error:', error);
-    res.status(500).json({ 
+    return NextResponse.json({ 
       error: 'Speech recognition failed',
       details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    }, { status: 500 });
   }
 }
 
@@ -95,4 +92,3 @@ export const createStreamingRecognition = () => {
       }
     });
 };
-

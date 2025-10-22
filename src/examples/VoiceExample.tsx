@@ -1,6 +1,6 @@
 // Example usage of useAIVoice hook
 import React from 'react';
-import { useAIVoice } from '@/hooks/useAIVoice';
+import { useAIVoice, useGoogleCloudVoice } from '@/hooks/useAIVoice';
 
 export const VoiceExample: React.FC = () => {
   const {

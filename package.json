@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@google-cloud/speech": "^6.0.1",
+    "@google-cloud/speech": "^6.7.1",
     "@google/generative-ai": "^0.24.1",
     "konva": "^10.0.2",
     "lucide-react": "^0.544.0",
@@ -21,6 +21,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/dom-speech-recognition": "^0.0.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
