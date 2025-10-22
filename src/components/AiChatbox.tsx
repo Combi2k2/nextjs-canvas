@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Send, X } from 'lucide-react';
+import { useAIVoice } from '@/hooks/useAIVoice';
 
 interface AiChatboxProps {
     x: number;
@@ -23,48 +24,73 @@ export default function AiChatbox({
     isVoiceSupported = false
 }: AiChatboxProps) {
     const [prompt, setPrompt] = useState('');
-    const [isListening, setIsListening] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
-    const recognitionRef = useRef<any>(null);
+
+    // Use the new useAIVoice hook
+    const {
+        state: voiceState,
+        startListening,
+        stopListening,
+        resetTranscript
+    } = useAIVoice(
+        {
+            language: 'en-US',
+            continuous: true, // Always continuous for manual control
+            interimResults: true,
+            maxAlternatives: 1
+        },
+        onVoiceStart,
+        onVoiceEnd
+    );
 
     useEffect(() => {
         // Focus input when component mounts
         if (inputRef.current) {
             inputRef.current.focus();
         }
-
-        // Initialize speech recognition if available
-        if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-            const SpeechRecognition = (window as any).webkitSpeechRecognition;
-            recognitionRef.current = new SpeechRecognition();
-            recognitionRef.current.continuous = false;
-            recognitionRef.current.interimResults = false;
-            recognitionRef.current.lang = 'en-US';
-
-            recognitionRef.current.onresult = (event: any) => {
-                const transcript = event.results[0][0].transcript;
-                setPrompt(transcript);
-                setIsListening(false);
-            };
-
-            recognitionRef.current.onerror = () => {
-                setIsListening(false);
-            };
-
-            recognitionRef.current.onend = () => {
-                setIsListening(false);
-            };
-        }
     }, []);
+
+    // Update prompt with real-time voice recognition
+    useEffect(() => {
+        if (voiceState.isListening) {
+            // Combine final transcript and interim transcript for real-time display
+            const currentVoiceText = voiceState.transcript + voiceState.interimTranscript;
+            
+            if (currentVoiceText) {
+                // Update the prompt input with current voice recognition
+                setPrompt(prev => {
+                    // Remove any previous voice text and add current voice text
+                    const textWithoutVoice = prev.replace(/🎤.*$/g, '').trim();
+                    return textWithoutVoice + (textWithoutVoice ? ' ' : '') + `🎤 ${currentVoiceText}`;
+                });
+            }
+        }
+    }, [voiceState.transcript, voiceState.interimTranscript, voiceState.isListening]);
+
+    // Handle final transcript when voice recognition stops
+    useEffect(() => {
+        if (voiceState.transcript && !voiceState.isListening) {
+            // Replace the voice placeholder with final transcript
+            setPrompt(prev => {
+                const finalText = prev.replace(/🎤.*$/g, voiceState.transcript).trim();
+                return finalText;
+            });
+            resetTranscript();
+        }
+    }, [voiceState.transcript, voiceState.isListening, resetTranscript]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (prompt.trim() && !isProcessing) {
             setIsProcessing(true);
             try {
-                await onSubmit(prompt.trim());
+                // Clean up voice text before submitting
+                const cleanPrompt = prompt.replace(/🎤.*$/g, '').trim();
+                await onSubmit(cleanPrompt);
                 setPrompt('');
+                // Close chatbox after successful submission
+                onClose();
             } catch (error) {
                 console.error('Error submitting prompt:', error);
             } finally {
@@ -74,16 +100,10 @@ export default function AiChatbox({
     };
 
     const handleVoiceToggle = () => {
-        if (!recognitionRef.current) return;
-
-        if (isListening) {
-            recognitionRef.current.stop();
-            setIsListening(false);
-            onVoiceEnd?.();
+        if (voiceState.isListening) {
+            stopListening();
         } else {
-            recognitionRef.current.start();
-            setIsListening(true);
-            onVoiceStart?.();
+            startListening();
         }
     };
 
@@ -92,9 +112,11 @@ export default function AiChatbox({
             className="ai-chatbox"
             style={{
                 position: 'absolute',
-                left: Math.max(10, x - 150),
-                top: Math.max(10, y - 120),
-                zIndex: 10000
+                left: Math.max(10, x - 200),
+                top: Math.max(10, y - 200),
+                zIndex: 10000,
+                width: '400px',
+                maxHeight: '500px'
             }}
         >
             <div className="ai-chatbox-content">
@@ -116,20 +138,24 @@ export default function AiChatbox({
                             type="text"
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="Describe what you want to improve..."
-                            className="ai-chatbox-input"
+                            placeholder={voiceState.isListening ? "Listening..." : "Describe what you want to improve..."}
+                            className={`ai-chatbox-input ${voiceState.isListening ? 'listening' : ''}`}
                             disabled={isProcessing}
+                            style={{
+                                backgroundColor: voiceState.isListening ? '#f0f9ff' : undefined,
+                                borderColor: voiceState.isListening ? '#3b82f6' : undefined
+                            }}
                         />
                         
-                        {isVoiceSupported && (
+                        {isVoiceSupported && voiceState.isSupported && (
                             <button
                                 type="button"
-                                className={`ai-chatbox-voice ${isListening ? 'listening' : ''}`}
+                                className={`ai-chatbox-voice ${voiceState.isListening ? 'listening' : ''}`}
                                 onClick={handleVoiceToggle}
                                 disabled={isProcessing}
-                                title={isListening ? 'Stop listening' : 'Start voice input'}
+                                title={voiceState.isListening ? 'Stop listening' : 'Start voice input'}
                             >
-                                {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                                {voiceState.isListening ? <MicOff size={16} /> : <Mic size={16} />}
                             </button>
                         )}
                         
@@ -143,6 +169,15 @@ export default function AiChatbox({
                         </button>
                     </div>
                 </form>
+                
+                {/* Voice recognition status - removed as requested */}
+                
+                {/* Error display */}
+                {voiceState.error && (
+                    <div className="ai-chatbox-error">
+                        <span>{voiceState.error}</span>
+                    </div>
+                )}
                 
                 {isProcessing && (
                     <div className="ai-chatbox-processing">

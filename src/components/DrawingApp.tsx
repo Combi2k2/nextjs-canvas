@@ -960,6 +960,10 @@ export default function DrawingApp() {
                         updateAiSelection={updateAiSelection}
                         endAiSelection={endAiSelection}
                         onAiImagesGenerated={(imgs) => setAiGeneratedImages(imgs)}
+                        onCloseAiChatbox={() => {
+                            // Optional: Add any cleanup logic here when chatbox closes
+                            console.log('AI chatbox closed');
+                        }}
                     />
                 </div>
             </div>

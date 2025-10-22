@@ -19,13 +19,14 @@ You are an image generation model specialized in creating visuals that emulate t
 *   **Stylized and clear forms:** Represent objects with well-defined, easily recognizable, and appealingly stylized shapes. Maintain visual clarity and good design principles.
 *   **Thoughtful, minimal shading (if any):** If shading is present, it should be simple cell shading (hard transitions between different color blocks) rather than subtle gradients or realistic light play.
 *   **Non-photorealistic style:** The output should clearly be an illustration or drawing, not a photograph or a highly detailed render.
-*   **Transparent backgrounds:** Backgrounds should be transparent so other objects from original canvas can still be visible.
 
 2.  **User Prompt Adherence & Refinement:** Carefully interpret the user's request. If an input image is provided for refinement, identify the core elements and suggested improvements. If a text prompt is given, create a new image that directly reflects the description while adhering strictly to the canvas app style.
 
 3.  **Multiple Options for User Choice:** Generate **3 to 5 distinct variations** of the requested image. Each variation should offer a slightly different perspective, composition, or interpretation of the prompt, allowing the user to select their preferred outcome. Ensure all variations maintain the canvas app aesthetic.
 
-4.  **Formatting:** Present the images clearly, preferably in a sequential format, ready for the user's review.`
+4.  **Formatting:** Present the images clearly, preferably in a sequential format, ready for the user's review.
+
+The background of the generated image must be white`
 
 
 // Helper function to create SVG path for 3-point bezier curve
@@ -73,6 +74,7 @@ interface CanvasProps {
     updateAiSelection?: (point: Point) => void;
     endAiSelection?: () => any;
     onAiImagesGenerated?: (images: string[]) => void;
+    onCloseAiChatbox?: () => void;
 }
 
 export default function Canvas({
@@ -107,7 +109,8 @@ export default function Canvas({
     startAiSelection,
     updateAiSelection,
     endAiSelection,
-    onAiImagesGenerated
+    onAiImagesGenerated,
+    onCloseAiChatbox
 }: CanvasProps) {
     const stageRef = useRef<Konva.Stage>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -129,6 +132,15 @@ export default function Canvas({
     useEffect(() => {
         setIsMounted(true);
     }, []);
+
+    // Close AI chatbox when tool changes away from AI
+    useEffect(() => {
+        if (tool !== 'ai' && showAiChatbox) {
+            setShowAiChatbox(false);
+            setCapturedImage(null);
+            onCloseAiChatbox?.();
+        }
+    }, [tool, showAiChatbox, onCloseAiChatbox]);
 
     // Auto-start editing for new text annotations
     useEffect(() => {
@@ -237,9 +249,24 @@ export default function Canvas({
             }
         }
         
-        // Handle AI tool selection
-        if (tool === 'ai' && startAiSelection) {
-            startAiSelection(point);
+        // Handle AI tool - capture entire canvas on click
+        if (tool === 'ai') {
+            // Capture the entire canvas
+            const fullCanvasImage = captureImageFromCanvas({
+                x: 0,
+                y: 0,
+                width: canvasSize.width,
+                height: canvasSize.height
+            });
+            
+            if (fullCanvasImage) {
+                setCapturedImage(fullCanvasImage);
+                setAiChatboxPosition({
+                    x: canvasSize.width / 2,
+                    y: canvasSize.height / 2
+                });
+                setShowAiChatbox(true);
+            }
             return;
         }
         
@@ -276,32 +303,13 @@ export default function Canvas({
             setHoveredVertexIndex(null);
         }
         
-        // Handle AI tool selection update
-        if (tool === 'ai' && updateAiSelection && aiSelectionRect) {
-            updateAiSelection(point);
-        }
+        // AI tool no longer uses drag selection - removed
         
         onMouseMove({ point, shiftKey: e.evt.shiftKey });
     };
 
     const handleMouseUp = () => {
-        // Handle AI tool selection completion
-        if (tool === 'ai' && endAiSelection) {
-            const completedRect = endAiSelection();
-            if (completedRect) {
-                // Capture image from the selected area
-                const imageData = captureImageFromCanvas(completedRect);
-                if (imageData) {
-                    setCapturedImage(imageData);
-                    setAiChatboxPosition({
-                        x: canvasSize.width / 2,
-                        y: canvasSize.height / 2
-                    });
-                    setShowAiChatbox(true);
-                }
-            }
-        }
-        
+        // AI tool now uses click-to-capture instead of drag selection
         onMouseUp();
     };
 
@@ -781,11 +789,9 @@ export default function Canvas({
                             ? 'move' 
                             : tool === 'eraser' 
                                 ? 'none' 
-                                : tool === 'ai' && !aiSelectionRect
-                                    ? 'crosshair'
-                                    : tool === 'ai' && aiSelectionRect
-                                        ? 'crosshair'
-                                        : 'crosshair' 
+                                : tool === 'ai'
+                                    ? 'pointer'
+                                    : 'crosshair' 
                 }}
             >
                 <Layer>
@@ -965,19 +971,7 @@ export default function Canvas({
                         />
                     )}
                     
-                    {/* Render AI selection rectangle */}
-                    {tool === 'ai' && aiSelectionRect && (
-                        <Rect
-                            x={aiSelectionRect.x}
-                            y={aiSelectionRect.y}
-                            width={aiSelectionRect.width}
-                            height={aiSelectionRect.height}
-                            stroke="#9333ea"
-                            strokeWidth={2}
-                            dash={[8, 4]}
-                            fill="rgba(147, 51, 234, 0.1)"
-                        />
-                    )}
+                    {/* AI selection rectangle - removed since we now use click-to-capture */}
                     
                     {/* Render eraser circle */}
                     {tool === 'eraser' && (
@@ -1035,7 +1029,7 @@ export default function Canvas({
                     onSubmit={handleAiPrompt}
                     onVoiceStart={handleVoiceStart}
                     onVoiceEnd={handleVoiceEnd}
-                    isVoiceSupported={typeof window !== 'undefined' && 'webkitSpeechRecognition' in window}
+                    isVoiceSupported={typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)}
                 />
             )}
         </div>
